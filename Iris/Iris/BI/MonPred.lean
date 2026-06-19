@@ -6,6 +6,7 @@ module
 
 public import Iris.BI.BI
 public import Iris.BI.BIBase
+public import Iris.BI.DerivedLaws
 public import Iris.Algebra.OFE
 public import Iris.Std.Classes
 
@@ -167,13 +168,13 @@ def pure (φ : Prop) : MonPred I PROP where
 /-- Conjunction, pointwise. -/
 def and (P Q : MonPred I PROP) : MonPred I PROP where
   monPred_at i := iprop(P.monPred_at i ∧ Q.monPred_at i)
-  monPred_mono _ := sorry
+  monPred_mono h := and_mono (P.monPred_mono h) (Q.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_or_def — (P ∨ Q) i := P i ∨ Q i
 /-- Disjunction, pointwise. -/
 def or (P Q : MonPred I PROP) : MonPred I PROP where
   monPred_at i := iprop(P.monPred_at i ∨ Q.monPred_at i)
-  monPred_mono _ := sorry
+  monPred_mono h := or_mono (P.monPred_mono h) (Q.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_impl_def — (P → Q) := upclosed (λ i, P i → Q i)
 /-- Implication (Kripke): up-closed so the result stays monotone. -/
@@ -199,7 +200,7 @@ def sExists (Ψ : MonPred I PROP → Prop) : MonPred I PROP where
 /-- Separating conjunction, pointwise. -/
 def sep (P Q : MonPred I PROP) : MonPred I PROP where
   monPred_at i := iprop(P.monPred_at i ∗ Q.monPred_at i)
-  monPred_mono _ := sorry
+  monPred_mono h := sep_mono (P.monPred_mono h) (Q.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_wand_def — (P -∗ Q) := upclosed (λ i, P i -∗ Q i)
 /-- Separating implication (Kripke): up-closed. -/
@@ -211,13 +212,13 @@ def wand (P Q : MonPred I PROP) : MonPred I PROP where
 /-- Persistency modality, pointwise. -/
 def persistently (P : MonPred I PROP) : MonPred I PROP where
   monPred_at i := iprop(<pers> (P.monPred_at i))
-  monPred_mono _ := sorry
+  monPred_mono h := persistently_mono (P.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_later_def — (▷ P) i := ▷ (P i)
 /-- Later modality, pointwise. -/
 def later (P : MonPred I PROP) : MonPred I PROP where
   monPred_at i := iprop(▷ (P.monPred_at i))
-  monPred_mono _ := sorry
+  monPred_mono h := later_mono (P.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_in_def — (monPred_in j) i := ⌜j ⊑ i⌝
 /-- `monPred_in j` holds at index `i` iff `j ⊑ i`. The canonical "I am at least
@@ -272,6 +273,14 @@ instance : BIBase (MonPred I PROP) where
   persistently  := MonPred.persistently
   later         := MonPred.later
 
+-- @ Coq iris.bi.monpred: monPred_entails_at — entailment unfolds pointwise.
+/-- MonPred entailment is *definitionally* the pointwise base entailment
+(`BIBase.Entails := MonPred.Entails := ∀ i, P i ⊢ Q i`). This `Iff.rfl` helper
+exposes that so BI-mixin proofs can `entails_at.mp h i` / `entails_at.mpr (fun i => …)`
+— the iris-lean analog of Coq's `split=> i`. -/
+theorem entails_at {P Q : MonPred I PROP} :
+    (P ⊢ Q) ↔ ∀ i, P.monPred_at i ⊢ Q.monPred_at i := Iff.rfl
+
 -- @ Coq iris.bi.monpred: monPred_bi (BI mixin — all proof fields sorry)
 noncomputable instance : BI (MonPred I PROP) where
   entails_preorder := sorry
@@ -299,7 +308,7 @@ noncomputable instance : BI (MonPred I PROP) where
   sForall_elim := sorry
   sExists_intro := sorry
   sExists_elim := sorry
-  sep_mono := sorry
+  sep_mono h h' := entails_at.mpr fun i => sep_mono (entails_at.mp h i) (entails_at.mp h' i)
   emp_sep := sorry
   sep_symm := sorry
   sep_assoc_l := sorry
@@ -341,24 +350,29 @@ variable {I : BiIndex} {PROP : Type _} [BI PROP]
 
 -- @ Coq iris.bi.monpred: monPred_at_emp
 theorem monPred_at_emp (i : I.car) :
-    (iprop(emp) : MonPred I PROP).monPred_at i ⊣⊢ iprop(emp) := sorry
+    (iprop(emp) : MonPred I PROP).monPred_at i ⊣⊢ iprop(emp) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_pure
 theorem monPred_at_pure (i : I.car) (φ : Prop) :
-    (iprop(⌜φ⌝) : MonPred I PROP).monPred_at i ⊣⊢ iprop(⌜φ⌝) := sorry
+    (iprop(⌜φ⌝) : MonPred I PROP).monPred_at i ⊣⊢ iprop(⌜φ⌝) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_and
 theorem monPred_at_and (i : I.car) (P Q : MonPred I PROP) :
-    (iprop(P ∧ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∧ Q.monPred_at i) := sorry
+    (iprop(P ∧ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∧ Q.monPred_at i) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_or
 theorem monPred_at_or (i : I.car) (P Q : MonPred I PROP) :
-    (iprop(P ∨ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∨ Q.monPred_at i) := sorry
+    (iprop(P ∨ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∨ Q.monPred_at i) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_impl (Kripke form)
 theorem monPred_at_impl (i : I.car) (P Q : MonPred I PROP) :
     (iprop(P → Q)).monPred_at i ⊣⊢
-      iprop(∀ j, ⌜I.rel i j⌝ → (P.monPred_at j → Q.monPred_at j)) := sorry
+      iprop(∀ j, ⌜I.rel i j⌝ → (P.monPred_at j → Q.monPred_at j)) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_forall
 theorem monPred_at_forall {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) :
@@ -370,36 +384,44 @@ theorem monPred_at_exist {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) 
 
 -- @ Coq iris.bi.monpred: monPred_at_sep
 theorem monPred_at_sep (i : I.car) (P Q : MonPred I PROP) :
-    (iprop(P ∗ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∗ Q.monPred_at i) := sorry
+    (iprop(P ∗ Q)).monPred_at i ⊣⊢ iprop(P.monPred_at i ∗ Q.monPred_at i) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_wand (Kripke form)
 theorem monPred_at_wand (i : I.car) (P Q : MonPred I PROP) :
     (iprop(P -∗ Q)).monPred_at i ⊣⊢
-      iprop(∀ j, ⌜I.rel i j⌝ → (P.monPred_at j -∗ Q.monPred_at j)) := sorry
+      iprop(∀ j, ⌜I.rel i j⌝ → (P.monPred_at j -∗ Q.monPred_at j)) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_persistently
 theorem monPred_at_persistently (i : I.car) (P : MonPred I PROP) :
-    (iprop(<pers> P)).monPred_at i ⊣⊢ iprop(<pers> (P.monPred_at i)) := sorry
+    (iprop(<pers> P)).monPred_at i ⊣⊢ iprop(<pers> (P.monPred_at i)) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_later
 theorem monPred_at_later (i : I.car) (P : MonPred I PROP) :
-    (iprop(▷ P)).monPred_at i ⊣⊢ iprop(▷ (P.monPred_at i)) := sorry
+    (iprop(▷ P)).monPred_at i ⊣⊢ iprop(▷ (P.monPred_at i)) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_in
 theorem monPred_at_in (i j : I.car) :
-    (MonPred.monPred_in j : MonPred I PROP).monPred_at i ⊣⊢ iprop(⌜I.rel j i⌝) := sorry
+    (MonPred.monPred_in j : MonPred I PROP).monPred_at i ⊣⊢ iprop(⌜I.rel j i⌝) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_embed
 theorem monPred_at_embed (i : I.car) (P : PROP) :
-    (MonPred.embed P : MonPred I PROP).monPred_at i ⊣⊢ P := sorry
+    (MonPred.embed P : MonPred I PROP).monPred_at i ⊣⊢ P :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_objectively
 theorem monPred_at_objectively (i : I.car) (P : MonPred I PROP) :
-    (MonPred.objectively P).monPred_at i ⊣⊢ iprop(∀ j, P.monPred_at j) := sorry
+    (MonPred.objectively P).monPred_at i ⊣⊢ iprop(∀ j, P.monPred_at j) :=
+  BIBase.BiEntails.of_eq rfl
 
 -- @ Coq iris.bi.monpred: monPred_at_subjectively
 theorem monPred_at_subjectively (i : I.car) (P : MonPred I PROP) :
-    (MonPred.subjectively P).monPred_at i ⊣⊢ iprop(∃ j, P.monPred_at j) := sorry
+    (MonPred.subjectively P).monPred_at i ⊣⊢ iprop(∃ j, P.monPred_at j) :=
+  BIBase.BiEntails.of_eq rfl
 
 end MonPred
 
