@@ -184,6 +184,55 @@ def sExists (Ψ : MonPred I PROP → Prop) : MonPred I PROP where
   monPred_mono h :=
     sExists_elim fun p ⟨q, hq, hp⟩ => (hp ▸ q.monPred_mono h).trans (sExists_intro ⟨q, hq, rfl⟩)
 
+/- Lean addition (not in Coq): predicate-form collection bridge.
+
+iris-lean lifts `sForall`/`sExists` over the predicate-style witness collection
+`atColl Ψ i := fun p => ∃ q, Ψ q ∧ q.monPred_at i = p` (the per-index projections
+of all witnesses of `Ψ`). Coq's index-family `monPred` does not have this re-indexing
+plumbing; in the predicate-style port it recurs across `sForall_ne`/`sExists_ne`, the
+`sForall`/`sExists` intro/elim mixin fields, the `persistently`/`later` exist/forall
+mixin fields, and the `monPred_at_forall`/`monPred_at_exist` unfold lemmas. The
+following intro/elim/liftRel bridges factor it out once. -/
+
+/-- The witness collection underlying `MonPred.sForall`/`MonPred.sExists` at index `i`:
+the set of `monPred_at i` projections of the witnesses of `Ψ`. -/
+def atColl (Ψ : MonPred I PROP → Prop) (i : I.car) : PROP → Prop :=
+  fun p => ∃ q : MonPred I PROP, Ψ q ∧ q.monPred_at i = p
+
+/-- A witness `q` of `Ψ` lands in the collection at `q.monPred_at i`. -/
+theorem atColl_mem {Ψ : MonPred I PROP → Prop} {q : MonPred I PROP} (hq : Ψ q) (i : I.car) :
+    atColl Ψ i (q.monPred_at i) := ⟨q, hq, rfl⟩
+
+/-- Elim bridge for `MonPred.sForall`: instantiate at any witness `q` of `Ψ`. -/
+theorem sForall_at_elim {Ψ : MonPred I PROP → Prop} {q : MonPred I PROP} (i : I.car) (hq : Ψ q) :
+    (MonPred.sForall Ψ).monPred_at i ⊢ q.monPred_at i :=
+  sForall_elim (atColl_mem hq i)
+
+/-- Intro bridge for `MonPred.sForall`: prove `R ⊢ (sForall Ψ).at i` witness-wise. -/
+theorem sForall_at_intro {Ψ : MonPred I PROP → Prop} {R : PROP} (i : I.car)
+    (h : ∀ q, Ψ q → R ⊢ q.monPred_at i) : R ⊢ (MonPred.sForall Ψ).monPred_at i :=
+  sForall_intro fun _ ⟨q, hq, hp⟩ => hp ▸ h q hq
+
+/-- Intro bridge for `MonPred.sExists`: a witness `q` of `Ψ` injects into the existential. -/
+theorem sExists_at_intro {Ψ : MonPred I PROP → Prop} {q : MonPred I PROP} (i : I.car) (hq : Ψ q) :
+    q.monPred_at i ⊢ (MonPred.sExists Ψ).monPred_at i :=
+  sExists_intro (atColl_mem hq i)
+
+/-- Elim bridge for `MonPred.sExists`: prove `(sExists Ψ).at i ⊢ R` witness-wise. -/
+theorem sExists_at_elim {Ψ : MonPred I PROP → Prop} {R : PROP} (i : I.car)
+    (h : ∀ q, Ψ q → q.monPred_at i ⊢ R) : (MonPred.sExists Ψ).monPred_at i ⊢ R :=
+  sExists_elim fun _ ⟨q, hq, hp⟩ => hp ▸ h q hq
+
+/-- `liftRel` transport bridge: a `liftRel R` between `Ψ₁`/`Ψ₂` (on `MonPred`, with `R`
+relating witnesses index-wise) lifts to `liftRel R'` between the two collections at `i`,
+where `R'` relates the projected `PROP` points. Used by `sForall_ne`/`sExists_ne`. -/
+theorem atColl_liftRel {R' : PROP → PROP → Prop} {Ψ₁ Ψ₂ : MonPred I PROP → Prop} (i : I.car)
+    (h₁ : ∀ q, Ψ₁ q → ∃ q', Ψ₂ q' ∧ R' (q.monPred_at i) (q'.monPred_at i))
+    (h₂ : ∀ q, Ψ₂ q → ∃ q', Ψ₁ q' ∧ R' (q'.monPred_at i) (q.monPred_at i)) :
+    liftRel R' (atColl Ψ₁ i) (atColl Ψ₂ i) :=
+  ⟨fun _ ⟨q, hq, hp⟩ => let ⟨q', hq', hr⟩ := h₁ q hq; ⟨_, ⟨q', hq', rfl⟩, hp ▸ hr⟩,
+   fun _ ⟨q, hq, hp⟩ => let ⟨q', hq', hr⟩ := h₂ q hq; ⟨_, ⟨q', hq', rfl⟩, hp ▸ hr⟩⟩
+
 /-- Separating conjunction, pointwise. -/
 @[rocq_alias monPred_sep_def]
 def sep (P Q : MonPred I PROP) : MonPred I PROP where
@@ -290,23 +339,13 @@ noncomputable instance : BI (MonPred I PROP) where
   imp_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
     forall_ne fun j => imp_ne.ne Dist.rfl (imp_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
   sForall_ne := fun {n Ψ₁ Ψ₂} h => dist_at.mpr fun i =>
-    Iris.BI.sForall_ne (P₁ := fun p => ∃ q : MonPred I PROP, Ψ₁ q ∧ q.monPred_at i = p)
-      (P₂ := fun p => ∃ q : MonPred I PROP, Ψ₂ q ∧ q.monPred_at i = p)
-      ⟨fun a ⟨q, hq, hqa⟩ =>
-          let ⟨q', hq', hqq'⟩ := h.1 q hq
-          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqa ▸ dist_at.mp hqq' i⟩,
-       fun b ⟨q, hq, hqb⟩ =>
-          let ⟨q', hq', hqq'⟩ := h.2 q hq
-          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqb ▸ dist_at.mp hqq' i⟩⟩
+    Iris.BI.sForall_ne <| MonPred.atColl_liftRel i
+      (fun q hq => let ⟨q', hq', hqq'⟩ := h.1 q hq; ⟨q', hq', dist_at.mp hqq' i⟩)
+      (fun q hq => let ⟨q', hq', hqq'⟩ := h.2 q hq; ⟨q', hq', dist_at.mp hqq' i⟩)
   sExists_ne := fun {n Ψ₁ Ψ₂} h => dist_at.mpr fun i =>
-    Iris.BI.sExists_ne (P₁ := fun p => ∃ q : MonPred I PROP, Ψ₁ q ∧ q.monPred_at i = p)
-      (P₂ := fun p => ∃ q : MonPred I PROP, Ψ₂ q ∧ q.monPred_at i = p)
-      ⟨fun a ⟨q, hq, hqa⟩ =>
-          let ⟨q', hq', hqq'⟩ := h.1 q hq
-          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqa ▸ dist_at.mp hqq' i⟩,
-       fun b ⟨q, hq, hqb⟩ =>
-          let ⟨q', hq', hqq'⟩ := h.2 q hq
-          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqb ▸ dist_at.mp hqq' i⟩⟩
+    Iris.BI.sExists_ne <| MonPred.atColl_liftRel i
+      (fun q hq => let ⟨q', hq', hqq'⟩ := h.1 q hq; ⟨q', hq', dist_at.mp hqq' i⟩)
+      (fun q hq => let ⟨q', hq', hqq'⟩ := h.2 q hq; ⟨q', hq', dist_at.mp hqq' i⟩)
   sep_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => sep_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
   wand_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
     forall_ne fun j => imp_ne.ne Dist.rfl (wand_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
@@ -327,11 +366,11 @@ noncomputable instance : BI (MonPred I PROP) where
     imp_elim <| (entails_at.mp h i).trans <|
       (forall_elim i).trans <| pure_imp_elim (Reflexive.refl : I.rel i i)
   sForall_intro h := entails_at.mpr fun i =>
-    sForall_intro fun _ ⟨q, hΨ, hq⟩ => hq ▸ entails_at.mp (h q hΨ) i
-  sForall_elim h := entails_at.mpr fun i => sForall_elim ⟨_, h, rfl⟩
-  sExists_intro h := entails_at.mpr fun i => sExists_intro ⟨_, h, rfl⟩
+    MonPred.sForall_at_intro i fun q hΨ => entails_at.mp (h q hΨ) i
+  sForall_elim h := entails_at.mpr fun i => MonPred.sForall_at_elim i h
+  sExists_intro h := entails_at.mpr fun i => MonPred.sExists_at_intro i h
   sExists_elim h := entails_at.mpr fun i =>
-    sExists_elim fun _ ⟨q, hΨ, hq⟩ => hq ▸ entails_at.mp (h q hΨ) i
+    MonPred.sExists_at_elim i fun q hΨ => entails_at.mp (h q hΨ) i
   sep_mono h h' := entails_at.mpr fun i => sep_mono (entails_at.mp h i) (entails_at.mp h' i)
   emp_sep := ⟨entails_at.mpr fun i => emp_sep.mp, entails_at.mpr fun i => emp_sep.mpr⟩
   sep_symm := entails_at.mpr fun i => sep_symm
@@ -352,9 +391,8 @@ noncomputable instance : BI (MonPred I PROP) where
     refine persistently_sExists_1.trans ?_
     refine exists_elim fun p => pure_elim_left fun ⟨q, hΨ, hq⟩ => ?_
     subst hq
-    refine (and_intro (pure_intro hΨ) BIBase.Entails.rfl).trans
-      (sExists_intro (p := (iprop(⌜Ψ q⌝ ∧ <pers> q) : MonPred I PROP).monPred_at i)
-        ⟨iprop(⌜Ψ q⌝ ∧ <pers> q), ⟨q, rfl⟩, rfl⟩)
+    exact (and_intro (pure_intro hΨ) BIBase.Entails.rfl).trans
+      (MonPred.sExists_at_intro (q := iprop(⌜Ψ q⌝ ∧ <pers> q)) i ⟨q, rfl⟩)
   persistently_absorb_l := entails_at.mpr fun i => persistently_absorb_l
   persistently_and_l := entails_at.mpr fun i => persistently_and_l
   later_mono h := entails_at.mpr fun i => later_mono (entails_at.mp h i)
@@ -365,17 +403,16 @@ noncomputable instance : BI (MonPred I PROP) where
     subst ha
     refine imp_intro <| pure_elim_right ?_
     rintro ⟨r, hΦ, rfl⟩
-    refine (sForall_elim (p := (MonPred.imp (MonPred.pure (Φ r)) (MonPred.later r)).monPred_at i)
-        ⟨_, ⟨r, rfl⟩, rfl⟩).trans ?_
+    refine (MonPred.sForall_at_elim (q := MonPred.imp (MonPred.pure (Φ r)) (MonPred.later r))
+        i ⟨r, rfl⟩).trans ?_
     refine (forall_elim i).trans ?_
     exact (pure_imp_elim (Reflexive.refl : I.rel i i)).trans (pure_imp_elim hΦ)
   later_sExists_false := fun {Φ} => entails_at.mpr fun i => by
     refine later_sExists_false.trans (or_mono BIBase.Entails.rfl ?_)
     refine exists_elim fun p => pure_elim_left fun ⟨q, hΦ, hq⟩ => ?_
     subst hq
-    refine (and_intro (pure_intro hΦ) BIBase.Entails.rfl).trans
-      (sExists_intro (p := (iprop(⌜Φ q⌝ ∧ ▷ q) : MonPred I PROP).monPred_at i)
-        ⟨iprop(⌜Φ q⌝ ∧ ▷ q), ⟨q, rfl⟩, rfl⟩)
+    exact (and_intro (pure_intro hΦ) BIBase.Entails.rfl).trans
+      (MonPred.sExists_at_intro (q := iprop(⌜Φ q⌝ ∧ ▷ q)) i ⟨q, rfl⟩)
   later_sep := ⟨entails_at.mpr fun i => later_sep.mp, entails_at.mpr fun i => later_sep.mpr⟩
   later_persistently := ⟨entails_at.mpr fun i => later_persistently.mp, entails_at.mpr fun i => later_persistently.mpr⟩
   later_false_em {P} := entails_at.mpr fun i => by
@@ -425,25 +462,15 @@ theorem monPred_at_impl (i : I.car) (P Q : MonPred I PROP) :
 
 @[rocq_alias monPred_at_forall]
 theorem monPred_at_forall {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) :
-    (iprop(∀ x, Φ x)).monPred_at i ⊣⊢ iprop(∀ x, (Φ x).monPred_at i) := by
-  refine ⟨?_, ?_⟩
-  · refine forall_intro fun x => ?_
-    exact sForall_elim ⟨Φ x, ⟨x, rfl⟩, rfl⟩
-  · refine sForall_intro fun p hp => ?_
-    obtain ⟨P, ⟨x, hPx⟩, hp'⟩ := hp
-    subst hPx; subst hp'
-    exact forall_elim x
+    (iprop(∀ x, Φ x)).monPred_at i ⊣⊢ iprop(∀ x, (Φ x).monPred_at i) :=
+  ⟨forall_intro fun x => MonPred.sForall_at_elim i ⟨x, rfl⟩,
+   MonPred.sForall_at_intro i fun _ ⟨x, hx⟩ => hx ▸ forall_elim x⟩
 
 @[rocq_alias monPred_at_exist]
 theorem monPred_at_exist {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) :
-    (iprop(∃ x, Φ x)).monPred_at i ⊣⊢ iprop(∃ x, (Φ x).monPred_at i) := by
-  refine ⟨?_, ?_⟩
-  · refine sExists_elim fun p hp => ?_
-    obtain ⟨P, ⟨x, hPx⟩, hp'⟩ := hp
-    subst hPx; subst hp'
-    exact exists_intro (Ψ := fun y => (Φ y).monPred_at i) x
-  · refine exists_elim fun x => ?_
-    exact sExists_intro ⟨Φ x, ⟨x, rfl⟩, rfl⟩
+    (iprop(∃ x, Φ x)).monPred_at i ⊣⊢ iprop(∃ x, (Φ x).monPred_at i) :=
+  ⟨MonPred.sExists_at_elim i fun _ ⟨x, hx⟩ => hx ▸ exists_intro (Ψ := fun y => (Φ y).monPred_at i) x,
+   exists_elim fun x => MonPred.sExists_at_intro i ⟨x, rfl⟩⟩
 
 @[rocq_alias monPred_at_sep]
 theorem monPred_at_sep (i : I.car) (P Q : MonPred I PROP) :
