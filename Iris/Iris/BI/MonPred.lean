@@ -310,27 +310,38 @@ theorem dist_at {n : Nat} {P Q : MonPred I PROP} :
 
 -- @ Coq iris.bi.monpred: monPred_bi (BI mixin — all proof fields sorry)
 noncomputable instance : BI (MonPred I PROP) where
-  entails_preorder := sorry
-  equiv_iff := sorry
-  and_ne := sorry
-  or_ne := sorry
-  imp_ne := sorry
+  entails_preorder :=
+    { refl := entails_at.mpr fun _ => BIBase.Entails.rfl
+      trans := fun h h' => entails_at.mpr fun i => (entails_at.mp h i).trans (entails_at.mp h' i) }
+  equiv_iff := fun {P Q} =>
+    ⟨fun h => ⟨entails_at.mpr fun i => (equiv_iff.mp (equiv_at.mp h i)).mp,
+              entails_at.mpr fun i => (equiv_iff.mp (equiv_at.mp h i)).mpr⟩,
+     fun h => equiv_at.mpr fun i => equiv_iff.mpr ⟨entails_at.mp h.1 i, entails_at.mp h.2 i⟩⟩
+  and_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => and_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
+  or_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => or_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
+  imp_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
+    forall_ne fun j => imp_ne.ne Dist.rfl (imp_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
   sForall_ne := sorry
   sExists_ne := sorry
-  sep_ne := sorry
-  wand_ne := sorry
-  persistently_ne := sorry
-  later_ne := sorry
+  sep_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => sep_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
+  wand_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
+    forall_ne fun j => imp_ne.ne Dist.rfl (wand_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
+  persistently_ne := ⟨fun _ _ _ h => dist_at.mpr fun i => persistently_ne.ne (dist_at.mp h i)⟩
+  later_ne := ⟨fun _ _ _ h => dist_at.mpr fun i => later_ne.ne (dist_at.mp h i)⟩
   pure_intro h := entails_at.mpr fun i => pure_intro h
-  pure_elim' := sorry
+  pure_elim' := fun {φ P} h => entails_at.mpr fun i => pure_elim' fun hφ => entails_at.mp (h hφ) i
   and_elim_l := entails_at.mpr fun i => and_elim_l
   and_elim_r := entails_at.mpr fun i => and_elim_r
   and_intro h h' := entails_at.mpr fun i => and_intro (entails_at.mp h i) (entails_at.mp h' i)
   or_intro_l := entails_at.mpr fun i => or_intro_l
   or_intro_r := entails_at.mpr fun i => or_intro_r
   or_elim h h' := entails_at.mpr fun i => or_elim (entails_at.mp h i) (entails_at.mp h' i)
-  imp_intro := sorry
-  imp_elim := sorry
+  imp_intro {P Q R} h := entails_at.mpr fun i =>
+    forall_intro fun j => imp_intro <| pure_elim_right fun (hij : I.rel i j) =>
+      (P.monPred_mono hij).trans <| imp_intro (entails_at.mp h j)
+  imp_elim {P Q R} h := entails_at.mpr fun i =>
+    imp_elim <| (entails_at.mp h i).trans <|
+      (forall_elim i).trans <| pure_imp_elim (Reflexive.refl : I.rel i i)
   sForall_intro h := entails_at.mpr fun i =>
     sForall_intro fun _ ⟨q, hΨ, hq⟩ => hq ▸ entails_at.mp (h q hΨ) i
   sForall_elim h := entails_at.mpr fun i => sForall_elim ⟨_, h, rfl⟩
@@ -341,8 +352,14 @@ noncomputable instance : BI (MonPred I PROP) where
   emp_sep := ⟨entails_at.mpr fun i => emp_sep.mp, entails_at.mpr fun i => emp_sep.mpr⟩
   sep_symm := entails_at.mpr fun i => sep_symm
   sep_assoc_l := entails_at.mpr fun i => sep_assoc_l
-  wand_intro := sorry
-  wand_elim := sorry
+  wand_intro {P Q R} h := entails_at.mpr fun i => by
+    refine forall_intro fun j => imp_intro ?_
+    refine pure_elim_right fun (hij : I.rel i j) => ?_
+    refine wand_intro (sep_symm.trans ?_)
+    exact (sep_mono_right (P.monPred_mono hij)).trans (sep_symm.trans (entails_at.mp h j))
+  wand_elim {P Q R} h := entails_at.mpr fun i =>
+    (sep_mono_left ((entails_at.mp h i).trans
+      ((forall_elim i).trans (pure_imp_elim (Reflexive.refl : I.rel i i))))).trans wand_elim_left
   persistently_mono h := entails_at.mpr fun i => persistently_mono (entails_at.mp h i)
   persistently_idem_2 := entails_at.mpr fun i => persistently_idem_2
   persistently_emp_2 := entails_at.mpr fun i => persistently_emp_2
