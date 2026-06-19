@@ -18,11 +18,16 @@ Port of `iris.bi.monpred` (monotone predicates over a `BiIndex`, a.k.a. the
 
 Reference: Coq Iris `iris/bi/monpred.v`.
 
-This is an INTERFACE PORT for lean-vst: signatures are 1:1 with Coq monpred.v,
-but all `def` bodies that produce data are concrete (so that downstream code can
-compute / unfold) while every `BI`/`OFE`/`COFE` mixin PROOF field and every
-"unfold lemma" is left as `sorry` (to be discharged in a later phase). The goal
-is that `assert := MonPred environ_index IProp` in the main repo type-checks.
+This is a PORT for lean-vst: signatures are 1:1 with Coq monpred.v. Phase 1-B has
+discharged the OFE/COFE structure, the BIBase connectives' monotonicity, the
+`monPred_at_*` unfold lemmas, and the bulk of the `BI` mixin (entailment preorder,
+ne/intro/elim/mono for and/or/imp/wand/sep/persistently/later/sForall/sExists,
+emp_sep, the Kripke imp/wand laws, …) via the `entails_at`/`equiv_at`/`dist_at`
+helpers (each `Iff.rfl`, the iris-lean analog of Coq `split=> i`).
+Six predicate-form proofs over `sForall`/`sExists` collections remain `sorry`
+(`sForall_ne`, `sExists_ne`, `persistently_sExists_1`, `later_sForall_2`,
+`later_sExists_false`, `later_false_em`) — they need the collection-shape
+re-indexing worked out interactively and are the focused follow-up.
 
 iris-lean specifics (vs Coq):
 - The base BI `PROP` uses iris-lean's `BIBase`/`BI` classes (fields
