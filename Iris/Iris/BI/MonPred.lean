@@ -18,22 +18,20 @@ Port of `iris.bi.monpred` (monotone predicates over a `BiIndex`, a.k.a. the
 
 Reference: Coq Iris `iris/bi/monpred.v`.
 
-This is a PORT for lean-vst: signatures are 1:1 with Coq monpred.v. Phase 1-B has
-discharged the OFE/COFE structure, the BIBase connectives' monotonicity, the
-`monPred_at_*` unfold lemmas, and the bulk of the `BI` mixin (entailment preorder,
-ne/intro/elim/mono for and/or/imp/wand/sep/persistently/later/sForall/sExists,
-emp_sep, the Kripke imp/wand laws, …) via the `entails_at`/`equiv_at`/`dist_at`
-helpers (each `Iff.rfl`, the iris-lean analog of Coq `split=> i`).
-Six predicate-form proofs over `sForall`/`sExists` collections remain `sorry`
-(`sForall_ne`, `sExists_ne`, `persistently_sExists_1`, `later_sForall_2`,
-`later_sExists_false`, `later_false_em`) — they need the collection-shape
-re-indexing worked out interactively and are the focused follow-up.
+This is a PORT for lean-vst: signatures are 1:1 with Coq monpred.v, and **fully
+proven (0 sorry)**. The OFE/COFE structure, the BIBase connectives' monotonicity,
+the `monPred_at_*` unfold lemmas, and the entire `BI` mixin are discharged via the
+`entails_at`/`equiv_at`/`dist_at` helpers (each `Iff.rfl`, the iris-lean analog of
+Coq `split=> i`). The Kripke `imp`/`wand` laws collapse the up-closure `∀ j` at
+`j := i` with `Reflexive.refl` (as in `imp_elim`/`wand_elim`); the predicate-form
+`sForall`/`sExists` `_ne`/modality laws re-index the collection
+`fun p => ∃ q, Ψ q ∧ q.monPred_at i = p` (modelled on the UPred/SIProp instances).
 
 iris-lean specifics (vs Coq):
 - The base BI `PROP` uses iris-lean's `BIBase`/`BI` classes (fields
   `Entails emp pure and or imp sForall sExists sep wand persistently later`).
 - `BI extends COFE`, so a `COFE (MonPred I PROP)` instance is required; it is
-  provided pointwise with sorry'd proofs.
+  provided pointwise (fully proven).
 - iris-lean uses predicate-style `sForall`/`sExists : (PROP → Prop) → PROP`
   rather than Coq's index-family `∀ x, Φ x`. The MonPred lifting collects the
   per-index projections of the witnesses (mirrors the UPred / Classical
@@ -113,7 +111,7 @@ def upclosed [BI PROP] (Φ : I.car → PROP) : I.car → PROP :=
 end MonPred
 
 /- ================================================================== -/
-/- OFE / COFE structure on `MonPred I PROP` (pointwise; proofs sorry). -/
+/- OFE / COFE structure on `MonPred I PROP` (pointwise; fully proven). -/
 /- ================================================================== -/
 
 section OFE
@@ -313,7 +311,7 @@ theorem equiv_at {P Q : MonPred I PROP} :
 theorem dist_at {n : Nat} {P Q : MonPred I PROP} :
     (P ≡{n}≡ Q) ↔ ∀ i, P.monPred_at i ≡{n}≡ Q.monPred_at i := Iff.rfl
 
--- @ Coq iris.bi.monpred: monPred_bi (BI mixin — all proof fields sorry)
+-- @ Coq iris.bi.monpred: monPred_bi (BI mixin — fully proven via entails_at/equiv_at/dist_at)
 noncomputable instance : BI (MonPred I PROP) where
   entails_preorder :=
     { refl := entails_at.mpr fun _ => BIBase.Entails.rfl
@@ -326,8 +324,24 @@ noncomputable instance : BI (MonPred I PROP) where
   or_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => or_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
   imp_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
     forall_ne fun j => imp_ne.ne Dist.rfl (imp_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
-  sForall_ne := sorry
-  sExists_ne := sorry
+  sForall_ne := fun {n Ψ₁ Ψ₂} h => dist_at.mpr fun i =>
+    Iris.BI.sForall_ne (P₁ := fun p => ∃ q : MonPred I PROP, Ψ₁ q ∧ q.monPred_at i = p)
+      (P₂ := fun p => ∃ q : MonPred I PROP, Ψ₂ q ∧ q.monPred_at i = p)
+      ⟨fun a ⟨q, hq, hqa⟩ =>
+          let ⟨q', hq', hqq'⟩ := h.1 q hq
+          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqa ▸ dist_at.mp hqq' i⟩,
+       fun b ⟨q, hq, hqb⟩ =>
+          let ⟨q', hq', hqq'⟩ := h.2 q hq
+          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqb ▸ dist_at.mp hqq' i⟩⟩
+  sExists_ne := fun {n Ψ₁ Ψ₂} h => dist_at.mpr fun i =>
+    Iris.BI.sExists_ne (P₁ := fun p => ∃ q : MonPred I PROP, Ψ₁ q ∧ q.monPred_at i = p)
+      (P₂ := fun p => ∃ q : MonPred I PROP, Ψ₂ q ∧ q.monPred_at i = p)
+      ⟨fun a ⟨q, hq, hqa⟩ =>
+          let ⟨q', hq', hqq'⟩ := h.1 q hq
+          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqa ▸ dist_at.mp hqq' i⟩,
+       fun b ⟨q, hq, hqb⟩ =>
+          let ⟨q', hq', hqq'⟩ := h.2 q hq
+          ⟨q'.monPred_at i, ⟨q', hq', rfl⟩, hqb ▸ dist_at.mp hqq' i⟩⟩
   sep_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i => sep_ne.ne (dist_at.mp h i) (dist_at.mp h' i)⟩
   wand_ne := ⟨fun _ _ _ h _ _ h' => dist_at.mpr fun i =>
     forall_ne fun j => imp_ne.ne Dist.rfl (wand_ne.ne (dist_at.mp h j) (dist_at.mp h' j))⟩
@@ -369,16 +383,41 @@ noncomputable instance : BI (MonPred I PROP) where
   persistently_idem_2 := entails_at.mpr fun i => persistently_idem_2
   persistently_emp_2 := entails_at.mpr fun i => persistently_emp_2
   persistently_and_2 := entails_at.mpr fun i => persistently_and_2
-  persistently_sExists_1 := sorry
+  persistently_sExists_1 := fun {Ψ} => entails_at.mpr fun i => by
+    refine persistently_sExists_1.trans ?_
+    refine exists_elim fun p => pure_elim_left fun ⟨q, hΨ, hq⟩ => ?_
+    subst hq
+    refine (and_intro (pure_intro hΨ) BIBase.Entails.rfl).trans
+      (sExists_intro (p := (iprop(⌜Ψ q⌝ ∧ <pers> q) : MonPred I PROP).monPred_at i)
+        ⟨iprop(⌜Ψ q⌝ ∧ <pers> q), ⟨q, rfl⟩, rfl⟩)
   persistently_absorb_l := entails_at.mpr fun i => persistently_absorb_l
   persistently_and_l := entails_at.mpr fun i => persistently_and_l
   later_mono h := entails_at.mpr fun i => later_mono (entails_at.mp h i)
   later_intro := entails_at.mpr fun i => later_intro
-  later_sForall_2 := sorry
-  later_sExists_false := sorry
+  later_sForall_2 := fun {Φ} => entails_at.mpr fun i => by
+    refine .trans ?_ later_sForall_2
+    refine sForall_intro fun _ ⟨_, ha⟩ => ?_
+    subst ha
+    refine imp_intro <| pure_elim_right ?_
+    rintro ⟨r, hΦ, rfl⟩
+    refine (sForall_elim (p := (MonPred.imp (MonPred.pure (Φ r)) (MonPred.later r)).monPred_at i)
+        ⟨_, ⟨r, rfl⟩, rfl⟩).trans ?_
+    refine (forall_elim i).trans ?_
+    exact (pure_imp_elim (Reflexive.refl : I.rel i i)).trans (pure_imp_elim hΦ)
+  later_sExists_false := fun {Φ} => entails_at.mpr fun i => by
+    refine later_sExists_false.trans (or_mono BIBase.Entails.rfl ?_)
+    refine exists_elim fun p => pure_elim_left fun ⟨q, hΦ, hq⟩ => ?_
+    subst hq
+    refine (and_intro (pure_intro hΦ) BIBase.Entails.rfl).trans
+      (sExists_intro (p := (iprop(⌜Φ q⌝ ∧ ▷ q) : MonPred I PROP).monPred_at i)
+        ⟨iprop(⌜Φ q⌝ ∧ ▷ q), ⟨q, rfl⟩, rfl⟩)
   later_sep := ⟨entails_at.mpr fun i => later_sep.mp, entails_at.mpr fun i => later_sep.mpr⟩
   later_persistently := ⟨entails_at.mpr fun i => later_persistently.mp, entails_at.mpr fun i => later_persistently.mpr⟩
-  later_false_em := sorry
+  later_false_em {P} := entails_at.mpr fun i => by
+    refine later_false_em.trans (or_mono_right ?_)
+    refine forall_intro fun j => imp_intro ?_
+    refine pure_elim_right fun (hij : I.rel i j) => ?_
+    exact imp_mono BIBase.Entails.rfl (P.monPred_mono hij)
 
 end Instances
 
@@ -393,7 +432,7 @@ class Objective {I : BiIndex} {PROP : Type _} [BI PROP] (P : MonPred I PROP) : P
   objective_at : ∀ i j : I.car, P.monPred_at i ⊢ P.monPred_at j
 
 /- ================================================================== -/
-/- Unfold lemmas (signatures 1:1 with Coq `monPred_at_*`; proofs sorry).-/
+/- Unfold lemmas (signatures 1:1 with Coq `monPred_at_*`; fully proven, `of_eq rfl`).-/
 /- ================================================================== -/
 
 namespace MonPred
