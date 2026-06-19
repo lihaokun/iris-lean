@@ -114,22 +114,35 @@ end MonPred
 section OFE
 variable {I : BiIndex} {PROP : Type _} [BI PROP]
 
--- @ Coq iris.bi.monpred: monPredO / monPred_dist / monPred_equiv
-/-- Pointwise OFE on monotone predicates (Coq `monPredO`):
-`P ≡ Q := ∀ i, P i ≡ Q i` and `P ≡{n}≡ Q := ∀ i, P i ≡{n}≡ Q i`. -/
+-- @ Coq iris.bi.monpred: monPredO / monPred_dist / monPred_equiv (Equiv/Dist pointwise).
+-- Pointwise OFE: `P ≡ Q := ∀ i, P i ≡ Q i`, `P ≡{n}≡ Q := ∀ i, P i ≡{n}≡ Q i`.
 noncomputable instance : OFE (MonPred I PROP) where
   Equiv P Q := ∀ i, P.monPred_at i ≡ Q.monPred_at i
   Dist n P Q := ∀ i, P.monPred_at i ≡{n}≡ Q.monPred_at i
-  dist_eqv := sorry
-  equiv_dist := sorry
-  dist_lt := sorry
+  dist_eqv :=
+    { refl _ _ := dist_eqv.refl _
+      symm h i := dist_eqv.symm (h i)
+      trans h1 h2 i := dist_eqv.trans (h1 i) (h2 i) }
+  equiv_dist {_ _} := by simp only [equiv_dist]; exact forall_comm
+  dist_lt h1 h2 i := dist_lt (h1 i) h2
+
+/-- Project a `MonPred` to its underlying `I.car → PROP` family as an OFE morphism
+(Coq `monPred_sig`); non-expansive because `Dist` on `MonPred` is definitionally pointwise.
+Used to take the COFE limit index-wise. -/
+def atHom : MonPred I PROP -n> (I.car → PROP) where
+  f P := P.monPred_at
+  ne.1 _ _ _ h := h
 
 -- @ Coq iris.bi.monpred: monPredC / monPred_compl (COFE completeness)
 /-- Pointwise COFE on monotone predicates (Coq `monPredC`). The limit is taken
 index-wise in the base BI. -/
 noncomputable instance : IsCOFE (MonPred I PROP) where
-  compl := sorry
-  conv_compl := sorry
+  compl c :=
+    { monPred_at := fun i => COFE.compl (c.map atHom) i
+      monPred_mono := fun {i j} h =>
+        LimitPreserving.entails (applyHom i) (applyHom j) (c.map atHom)
+          (fun n => (c n).monPred_mono h) }
+  conv_compl {n c} := IsCOFE.conv_compl (c := c.map atHom) (n := n)
 
 end OFE
 
@@ -180,7 +193,9 @@ def or (P Q : MonPred I PROP) : MonPred I PROP where
 /-- Implication (Kripke): up-closed so the result stays monotone. -/
 def imp (P Q : MonPred I PROP) : MonPred I PROP where
   monPred_at := MonPred.upclosed (fun i => iprop(P.monPred_at i → Q.monPred_at i))
-  monPred_mono _ := sorry
+  monPred_mono h :=
+    forall_intro fun k => (forall_elim k).trans
+      (imp_mono_left (pure_mono fun hjk => Transitive.trans h hjk))
 
 -- @ Coq iris.bi.monpred: monPred_forall_def — (∀ x, Φ x) i := ∀ x, Φ x i
 /-- Universal quantification over `PROP`-valued predicates, lifted pointwise.
@@ -188,13 +203,15 @@ For iris-lean's predicate-form `sForall (Ψ : MonPred I PROP → Prop)`, the ind
 `i` projection ranges over the `monPred_at i` of all witnesses of `Ψ`. -/
 def sForall (Ψ : MonPred I PROP → Prop) : MonPred I PROP where
   monPred_at i := BIBase.sForall (fun p => ∃ q : MonPred I PROP, Ψ q ∧ q.monPred_at i = p)
-  monPred_mono _ := sorry
+  monPred_mono h :=
+    sForall_intro fun p ⟨q, hq, hp⟩ => (sForall_elim ⟨q, hq, rfl⟩).trans (hp ▸ q.monPred_mono h)
 
 -- @ Coq iris.bi.monpred: monPred_exist_def — (∃ x, Φ x) i := ∃ x, Φ x i
 /-- Existential quantification over `PROP`-valued predicates, lifted pointwise. -/
 def sExists (Ψ : MonPred I PROP → Prop) : MonPred I PROP where
   monPred_at i := BIBase.sExists (fun p => ∃ q : MonPred I PROP, Ψ q ∧ q.monPred_at i = p)
-  monPred_mono _ := sorry
+  monPred_mono h :=
+    sExists_elim fun p ⟨q, hq, hp⟩ => (hp ▸ q.monPred_mono h).trans (sExists_intro ⟨q, hq, rfl⟩)
 
 -- @ Coq iris.bi.monpred: monPred_sep_def — (P ∗ Q) i := P i ∗ Q i
 /-- Separating conjunction, pointwise. -/
@@ -206,7 +223,9 @@ def sep (P Q : MonPred I PROP) : MonPred I PROP where
 /-- Separating implication (Kripke): up-closed. -/
 def wand (P Q : MonPred I PROP) : MonPred I PROP where
   monPred_at := MonPred.upclosed (fun i => iprop(P.monPred_at i -∗ Q.monPred_at i))
-  monPred_mono _ := sorry
+  monPred_mono h :=
+    forall_intro fun k => (forall_elim k).trans
+      (imp_mono_left (pure_mono fun hjk => Transitive.trans h hjk))
 
 -- @ Coq iris.bi.monpred: monPred_persistently_def — (<pers> P) i := <pers> (P i)
 /-- Persistency modality, pointwise. -/
@@ -225,7 +244,7 @@ def later (P : MonPred I PROP) : MonPred I PROP where
 at index `j`" assertion. -/
 def monPred_in (j : I.car) : MonPred I PROP where
   monPred_at i := iprop(⌜I.rel j i⌝)
-  monPred_mono _ := sorry
+  monPred_mono h := pure_mono fun hji => Transitive.trans hji h
 
 -- @ Coq iris.bi.monpred: monPred_embed_def — ⎡P⎤ i := P
 /-- Embedding of a base proposition as an index-independent monotone predicate
@@ -281,6 +300,14 @@ exposes that so BI-mixin proofs can `entails_at.mp h i` / `entails_at.mpr (fun i
 theorem entails_at {P Q : MonPred I PROP} :
     (P ⊢ Q) ↔ ∀ i, P.monPred_at i ⊢ Q.monPred_at i := Iff.rfl
 
+/-- MonPred OFE equivalence is *definitionally* pointwise (`Equiv P Q := ∀ i, P i ≡ Q i`). -/
+theorem equiv_at {P Q : MonPred I PROP} :
+    (P ≡ Q) ↔ ∀ i, P.monPred_at i ≡ Q.monPred_at i := Iff.rfl
+
+/-- MonPred OFE distance is *definitionally* pointwise (`Dist n P Q := ∀ i, P i ≡{n}≡ Q i`). -/
+theorem dist_at {n : Nat} {P Q : MonPred I PROP} :
+    (P ≡{n}≡ Q) ↔ ∀ i, P.monPred_at i ≡{n}≡ Q.monPred_at i := Iff.rfl
+
 -- @ Coq iris.bi.monpred: monPred_bi (BI mixin — all proof fields sorry)
 noncomputable instance : BI (MonPred I PROP) where
   entails_preorder := sorry
@@ -294,39 +321,41 @@ noncomputable instance : BI (MonPred I PROP) where
   wand_ne := sorry
   persistently_ne := sorry
   later_ne := sorry
-  pure_intro := sorry
+  pure_intro h := entails_at.mpr fun i => pure_intro h
   pure_elim' := sorry
-  and_elim_l := sorry
-  and_elim_r := sorry
-  and_intro := sorry
-  or_intro_l := sorry
-  or_intro_r := sorry
-  or_elim := sorry
+  and_elim_l := entails_at.mpr fun i => and_elim_l
+  and_elim_r := entails_at.mpr fun i => and_elim_r
+  and_intro h h' := entails_at.mpr fun i => and_intro (entails_at.mp h i) (entails_at.mp h' i)
+  or_intro_l := entails_at.mpr fun i => or_intro_l
+  or_intro_r := entails_at.mpr fun i => or_intro_r
+  or_elim h h' := entails_at.mpr fun i => or_elim (entails_at.mp h i) (entails_at.mp h' i)
   imp_intro := sorry
   imp_elim := sorry
-  sForall_intro := sorry
-  sForall_elim := sorry
-  sExists_intro := sorry
-  sExists_elim := sorry
+  sForall_intro h := entails_at.mpr fun i =>
+    sForall_intro fun _ ⟨q, hΨ, hq⟩ => hq ▸ entails_at.mp (h q hΨ) i
+  sForall_elim h := entails_at.mpr fun i => sForall_elim ⟨_, h, rfl⟩
+  sExists_intro h := entails_at.mpr fun i => sExists_intro ⟨_, h, rfl⟩
+  sExists_elim h := entails_at.mpr fun i =>
+    sExists_elim fun _ ⟨q, hΨ, hq⟩ => hq ▸ entails_at.mp (h q hΨ) i
   sep_mono h h' := entails_at.mpr fun i => sep_mono (entails_at.mp h i) (entails_at.mp h' i)
-  emp_sep := sorry
-  sep_symm := sorry
-  sep_assoc_l := sorry
+  emp_sep := ⟨entails_at.mpr fun i => emp_sep.mp, entails_at.mpr fun i => emp_sep.mpr⟩
+  sep_symm := entails_at.mpr fun i => sep_symm
+  sep_assoc_l := entails_at.mpr fun i => sep_assoc_l
   wand_intro := sorry
   wand_elim := sorry
-  persistently_mono := sorry
-  persistently_idem_2 := sorry
-  persistently_emp_2 := sorry
-  persistently_and_2 := sorry
+  persistently_mono h := entails_at.mpr fun i => persistently_mono (entails_at.mp h i)
+  persistently_idem_2 := entails_at.mpr fun i => persistently_idem_2
+  persistently_emp_2 := entails_at.mpr fun i => persistently_emp_2
+  persistently_and_2 := entails_at.mpr fun i => persistently_and_2
   persistently_sExists_1 := sorry
-  persistently_absorb_l := sorry
-  persistently_and_l := sorry
-  later_mono := sorry
-  later_intro := sorry
+  persistently_absorb_l := entails_at.mpr fun i => persistently_absorb_l
+  persistently_and_l := entails_at.mpr fun i => persistently_and_l
+  later_mono h := entails_at.mpr fun i => later_mono (entails_at.mp h i)
+  later_intro := entails_at.mpr fun i => later_intro
   later_sForall_2 := sorry
   later_sExists_false := sorry
-  later_sep := sorry
-  later_persistently := sorry
+  later_sep := ⟨entails_at.mpr fun i => later_sep.mp, entails_at.mpr fun i => later_sep.mpr⟩
+  later_persistently := ⟨entails_at.mpr fun i => later_persistently.mp, entails_at.mpr fun i => later_persistently.mpr⟩
   later_false_em := sorry
 
 end Instances
@@ -376,11 +405,25 @@ theorem monPred_at_impl (i : I.car) (P Q : MonPred I PROP) :
 
 -- @ Coq iris.bi.monpred: monPred_at_forall
 theorem monPred_at_forall {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) :
-    (iprop(∀ x, Φ x)).monPred_at i ⊣⊢ iprop(∀ x, (Φ x).monPred_at i) := sorry
+    (iprop(∀ x, Φ x)).monPred_at i ⊣⊢ iprop(∀ x, (Φ x).monPred_at i) := by
+  refine ⟨?_, ?_⟩
+  · refine forall_intro fun x => ?_
+    exact sForall_elim ⟨Φ x, ⟨x, rfl⟩, rfl⟩
+  · refine sForall_intro fun p hp => ?_
+    obtain ⟨P, ⟨x, hPx⟩, hp'⟩ := hp
+    subst hPx; subst hp'
+    exact forall_elim x
 
 -- @ Coq iris.bi.monpred: monPred_at_exist
 theorem monPred_at_exist {α : Sort _} (i : I.car) (Φ : α → MonPred I PROP) :
-    (iprop(∃ x, Φ x)).monPred_at i ⊣⊢ iprop(∃ x, (Φ x).monPred_at i) := sorry
+    (iprop(∃ x, Φ x)).monPred_at i ⊣⊢ iprop(∃ x, (Φ x).monPred_at i) := by
+  refine ⟨?_, ?_⟩
+  · refine sExists_elim fun p hp => ?_
+    obtain ⟨P, ⟨x, hPx⟩, hp'⟩ := hp
+    subst hPx; subst hp'
+    exact exists_intro (Ψ := fun y => (Φ y).monPred_at i) x
+  · refine exists_elim fun x => ?_
+    exact sExists_intro ⟨Φ x, ⟨x, rfl⟩, rfl⟩
 
 -- @ Coq iris.bi.monpred: monPred_at_sep
 theorem monPred_at_sep (i : I.car) (P Q : MonPred I PROP) :
