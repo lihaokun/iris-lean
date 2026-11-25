@@ -1,5 +1,5 @@
 /-
-Copyright (c) 2025. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Markus de Medeiros
 -/
@@ -7,21 +7,22 @@ module
 
 public import Iris.Algebra.Auth
 public import Iris.Algebra.Excl
-meta import Iris.Std.RocqPorting
 
 public section
 
-/-!
-# Exclusive Authoritative CMRA
+local stepindex Nat
 
-Authoritative CMRA where the fragment is exclusively owned.
+/-!
+# Exclusive Authoritative ORA
+
+Authoritative ORA where the fragment is exclusively owned.
 This is effectively a single "ghost variable" with two views, the fragment `◯E a`
 and the authority `●E a`.
 -/
 
 namespace Iris
 
-open OFE CMRA Auth Excl Option
+open OFE ORA Auth Excl Iris.Option Iris.OFE.Option
 
 namespace ExclAuth
 
@@ -32,8 +33,6 @@ abbrev ExclAuthR := Auth (Option (Excl A))
 
 @[rocq_alias excl_authUR]
 abbrev ExclAuthUR := Auth (Option (Excl A))
-
-instance instLeibniz [Leibniz A] : Leibniz (ExclAuthR (A := A)) := inferInstance
 
 @[rocq_alias excl_auth_auth]
 abbrev auth (a : A) : ExclAuthR (A := A) := ● (some (excl a))
@@ -79,12 +78,10 @@ theorem agreeN {a b : A} (h : ✓{n} (●E a) • ◯E b) : a ≡{n}≡ b :=
   dist_of_inc_exclusive (Auth.both_validN.mp h).1 trivial |>.symm
 
 @[rocq_alias excl_auth_agree]
-theorem agree {a b : A} (h : ✓ (●E a) • ◯E b) : a ≡ b :=
-  equiv_dist.mpr fun _ => agreeN (Valid.validN h)
+theorem agree {a b : A} (h : ✓ (●E a) • ◯E b) : a = b :=
+  OFE.eq_dist.mpr fun _ => agreeN (Valid.validN h)
 
-@[rocq_alias excl_auth_agree_L]
-theorem agree_L [Leibniz A] {a b : A} (h : ✓ (●E a) • ◯E b) : a = b :=
-  (agree h).to_eq
+#rocq_ignore excl_auth_agree_L "Use agree"
 
 @[rocq_alias excl_auth_auth_op_validN]
 theorem auth_op_validN {a b : A} : (✓{n} (●E a) • ●E b) ↔ False :=
@@ -111,12 +108,16 @@ theorem update {a b a' : A} : ((●E a) • ◯E b) ~~> ((●E a') • ◯E a') 
 /-! ## Functors -/
 
 @[rocq_alias excl_authURF]
-abbrev ExclAuthURF (T : COFE.OFunctorPre) [URFunctor T] : COFE.OFunctorPre :=
+abbrev ExclAuthURF (T : COFE.OFunctorPre) [COFE.OFunctor T] : COFE.OFunctorPre :=
   AuthURF (OptionOF (ExclOF T))
 
+#rocq_ignore excl_authURF_contractive "Found by typeclass inference"
+
 @[rocq_alias excl_authRF]
-abbrev ExclAuthRF (T : COFE.OFunctorPre) [URFunctor T] : COFE.OFunctorPre :=
+abbrev ExclAuthRF (T : COFE.OFunctorPre) [COFE.OFunctor T] : COFE.OFunctorPre :=
   AuthRF (OptionOF (ExclOF T))
+
+#rocq_ignore excl_authRF_contractive "Found by typeclass inference"
 
 end ExclAuth
 end Iris

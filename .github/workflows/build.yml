@@ -17,16 +17,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: leanprover/lean-action@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: leanprover/lean-action@fe408643ea7367d8c0404a8be3975bb145f5fb64 # v1.7.0
         with:
           lake-package-directory: Iris
           build-args: "--wfail"
+          test: true
+          lint: true
+      - name: Check Iris.lean, Init.lean and other entry-point module imports
+        working-directory: Iris
+        run: lake exe check-imports Iris
       - name: Dump porting data
         working-directory: Iris
         run: lake exe dumpPortingData
       - name: Upload porting_data.json
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: porting-data
           path: Iris/.lake/porting_data.json
@@ -34,21 +39,28 @@ jobs:
 
   build-math:
     runs-on: ubuntu-latest
+    env:
+      LAKE_NO_CACHE: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: leanprover/lean-action@v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: leanprover/lean-action@fe408643ea7367d8c0404a8be3975bb145f5fb64 # v1.7.0
         with:
           lake-package-directory: IrisMath
           use-mathlib-cache: true
           build-args: "--wfail"
+          test: true
+          lint: true
+      - name: Check that all modules are imported by IrisMath.lean
+        working-directory: IrisMath
+        run: lake exe check-imports --entry-points-only IrisMath
 
   report:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Download porting_data.json
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: porting-data
           path: Iris/.lake
@@ -58,7 +70,7 @@ jobs:
           sha=$(cat scripts/ROCQ_REVISION)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Cache Rocq definitions
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: Iris/.lake/iris-rocq-cache
           key: rocq-defs-${{ steps.rocq-commit.outputs.sha }}
@@ -67,24 +79,26 @@ jobs:
           mkdir -p _site
           python3 scripts/check_porting.py --no-build --format html --lean-rev "${{ github.sha }}" -o _site/index.html
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
 
   check-stale:
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Download porting_data.json
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: porting-data
           path: Iris/.lake
       - name: Read pinned Rocq commit
         id: rocq-commit
-        run: echo "sha=$(cat scripts/ROCQ_REVISION)" >> "$GITHUB_OUTPUT"
+        run: |
+          sha=$(cat scripts/ROCQ_REVISION)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Cache Rocq definitions
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: Iris/.lake/iris-rocq-cache
           key: rocq-defs-${{ steps.rocq-commit.outputs.sha }}
@@ -127,4 +141,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

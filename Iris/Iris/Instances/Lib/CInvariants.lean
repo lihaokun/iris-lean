@@ -1,5 +1,5 @@
 /-
-Copyright (c) 2026. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Markus de Medeiros
 -/
@@ -10,6 +10,7 @@ public import Iris.Instances.IProp.Instance
 public import Iris.Instances.Lib.FUpd
 public import Iris.Instances.Lib.Invariants
 public import Iris.BI.Lib.Fractional
+public import Iris.Algebra.DFrac
 public import Iris.Algebra.Frac
 public import Iris.Algebra.Excl
 public import Iris.Std.Namespaces
@@ -18,14 +19,18 @@ public import Iris.Std.List
 
 @[expose] public section
 
+local stepindex Nat
+
 namespace Iris
 
-open BI CMRA OFE Iris Std LawfulSet Excl COFE
+open BI ORA OFE Iris Iris.Std LawfulSet Excl COFE ProofMode
+
+local bi (IProp GF)
 
 /-! # Cancelable Invariants -/
 
 abbrev CInvF : OFunctorPre :=
-  ProdOF (constOF (Option (Excl Unit))) (constOF (Option Qp))
+  ProdOF (constOF (Option (Excl Unit))) (constOF (Option DFrac))
 
 @[rocq_alias cinvG]
 class CInvG (GF : BundledGFunctors) where
@@ -33,12 +38,15 @@ class CInvG (GF : BundledGFunctors) where
 
 attribute [reducible, instance] CInvG.inv
 
+#rocq_ignore «cinvΣ» "Superseded by the `CInvG` typeclass on `BundledGFunctors`."
+#rocq_ignore «subG_cinvΣ» "Superseded by Lean's direct `ElemG` typeclass synthesis."
+
 namespace CancelableInvariant
 
 variable {GF : BundledGFunctors} [InvGS_gen hlc GF] [W : CInvG GF]
 
 @[rocq_alias cinv_own]
-def own (γ : GName) (p : Qp) : IProp GF := iOwn (E := W.inv) γ (none, some p)
+def own (γ : GName) (p : Qp) : IProp GF := iOwn (E := W.inv) γ (none, some (DFrac.own p))
 
 @[rocq_alias cinv_excl]
 def excl (γ : GName) : IProp GF := iOwn (E := W.inv) γ (some (Excl.excl ()), none)
@@ -77,12 +85,11 @@ instance instPersistentCinv (N : Namespace) (γ : GName) (P : IProp GF) :
 
 @[rocq_alias cinv_own_valid]
 theorem own_valid {γ : GName} {q1 q2 : Qp} :
-    ⊢@{IProp GF} own γ q1 -∗ own γ q2 -∗ ⌜(q1 + q2).val ≤ 1⌝ := by
+    ⊢ own γ q1 -∗ own γ q2 -∗ ⌜(q1 + q2).val ≤ 1⌝ := by
   unfold own
   iintro H1 H2
-  ihave H := iOwn_op $$ [H1 H2]; iframe
-  ihave H := iOwn_cmraValid $$ H
-  icases internalCmraValid_discrete $$ H with %H
+  icombine H1 H2 as H
+  ihave %H := iOwn_cmraValid $$ H
   ipureintro
   exact H.2
 
@@ -90,26 +97,24 @@ theorem own_valid {γ : GName} {q1 q2 : Qp} :
 instance instFractionalOwn (γ : GName) :
     Fractional (fun p : Qp => own (GF := GF) γ p) where
   fractional p q := by
-    show iOwn (E := W.inv) γ ((none, some (p + q))) ⊣⊢ _
+    change iOwn (E := W.inv) γ ((none, some (DFrac.own (p + q)))) ⊣⊢ _
     refine .trans ?_ iOwn_op
-    exact equiv_iff.mp (NonExpansive.eqv (.of_eq rfl))
+    exact equiv_iff.mp rfl
 
 @[rocq_alias cinv_own_as_fractional]
 instance instAsFractionalOwn (γ : GName) (q : Qp) :
-    AsFractional (own (GF := GF) γ q) (fun p : Qp => own γ p) q where
+    AsFractional (own (GF := GF) γ q) ioΦ (fun p : Qp => own γ p) ioq q where
   as_fractional := .rfl
   as_fractional_fractional := instFractionalOwn γ
 
 @[rocq_alias cinv_own_excl_alloc]
 theorem own_excl_alloc (P : GName → Prop) (HP : PredInfinite P) :
-    ⊢@{IProp GF} |==> ∃ γ, ⌜P γ⌝ ∗ excl γ ∗ own γ (1 : Qp) := by
+    ⊢ |==> ∃ γ, ⌜P γ⌝ ∗ excl γ ∗ own γ (1 : Qp) := by
   imod iOwn_alloc_strong (E := W.inv)
-    ((some (Excl.excl ()), none) • (none, some (1 : Qp)) :
+    ((some (Excl.excl ()), none) • (none, some (DFrac.own 1)) :
       CInvF (IProp GF) (IProp GF)) P ?_
-    ⟨trivial, Qp.valid_one⟩ with ⟨%γ, %HPγ, Hown⟩
-  · intro N
-    obtain ⟨γ, HPγ, Hγ⟩ := HP (List.range (N + 1))
-    exact ⟨γ, by grind, HPγ⟩
+    ⟨trivial, DFrac.valid_own_one⟩ with ⟨%γ, %HPγ, Hown⟩
+  · exact HP.exists_ge
   · imodintro
     iexists γ
     -- NOTE: Ideally, iframe would discharge this pure goal
@@ -156,7 +161,7 @@ nonrec theorem cinv_iff {N : Namespace} {γ : GName} {P Q : IProp GF} :
 
 @[rocq_alias cinv_alloc_strong]
 theorem alloc_strong (P : GName → Prop) (HP : PredInfinite P) (E : CoPset) (N : Namespace) :
-    ⊢@{IProp GF} |={E}=> ∃ γ, ⌜P γ⌝ ∗ own γ (1 : Qp) ∗
+    ⊢ |={E}=> ∃ γ, ⌜P γ⌝ ∗ own γ (1 : Qp) ∗
       ∀ Q, ▷ Q ={E}=∗ cinv N γ Q := by
   imod own_excl_alloc P HP with ⟨%γ, %HPγ, Hexcl, Hown⟩
   imodintro
@@ -172,7 +177,7 @@ theorem alloc_strong (P : GName → Prop) (HP : PredInfinite P) (E : CoPset) (N 
 @[rocq_alias cinv_alloc_strong_open]
 theorem alloc_strong_open (P : GName → Prop) (HP : PredInfinite P) (E : CoPset) (N : Namespace)
   (Hsub : ↑N ⊆ E) :
-    ⊢@{IProp GF} |={E}=> ∃ γ, ⌜P γ⌝ ∗ own γ (1 : Qp) ∗
+    ⊢ |={E}=> ∃ γ, ⌜P γ⌝ ∗ own γ (1 : Qp) ∗
       ∀ (Q : IProp GF), |={E, E \ ↑N}=> cinv N γ Q ∗ (▷ Q ={E \ ↑N, E}=∗ True) := by
   imod own_excl_alloc P HP with ⟨%γ, %HPγ, Hexcl, Hown⟩
   imodintro
@@ -192,7 +197,7 @@ theorem alloc_strong_open (P : GName → Prop) (HP : PredInfinite P) (E : CoPset
 
 @[rocq_alias cinv_alloc_cofinite]
 theorem alloc_cofinite (G : List GName) (E : CoPset) (N : Namespace) :
-    ⊢@{IProp GF} |={E}=> ∃ γ, ⌜γ ∉ G⌝ ∗ own γ (1 : Qp) ∗
+    ⊢ |={E}=> ∃ γ, ⌜γ ∉ G⌝ ∗ own γ (1 : Qp) ∗
       ∀ Q, ▷ Q ={E}=∗ cinv N γ Q :=
   alloc_strong (· ∉ G) (PredInfinite.not_mem G) E N
 
@@ -208,7 +213,7 @@ theorem alloc (E : CoPset) (N : Namespace) (P : IProp GF) :
 
 @[rocq_alias cinv_alloc_open]
 theorem alloc_open (E : CoPset) (N : Namespace) (P : IProp GF) (Hsub : ↑N ⊆ E) :
-    ⊢@{IProp GF} |={E, E \ ↑N}=> ∃ γ, cinv N γ P ∗ own γ (1 : Qp) ∗
+    ⊢ |={E, E \ ↑N}=> ∃ γ, cinv N γ P ∗ own γ (1 : Qp) ∗
       (▷ P ={E \ ↑N, E}=∗ True) := by
   imod alloc_strong_open (fun _ => True) PredInfinite.true E N Hsub
     with ⟨%γ, _, Hown, Hmake⟩
@@ -282,12 +287,50 @@ theorem acc_one (E : CoPset) (N : Namespace) (γ : GName) (P : IProp GF) (Hsub :
     iapply own_one_l $$ Hγ Hγ'
 
 @[rocq_alias cinv_cancel]
-theorem cancel (E : CoPset) (N : Namespace) (γ : GName) (P : IProp GF) (Hsub : ↑N ⊆ E) :
+theorem cancel (E : CoPset) {N : Namespace} {γ : GName} {P : IProp GF} (Hsub : ↑N ⊆ E) :
     ⊢ cinv N γ P -∗ own γ (1 : Qp) ={E}=∗ ▷ P := by
   iintro #Hinv Hγ
   imod acc_one _ _ _ _ Hsub $$ Hinv Hγ with ⟨HP, -⟩
   imodintro
   iexact HP
+
+@[rocq_alias cinv_inv]
+theorem to_inv {N : Namespace} {γ : GName} {q : Qp} {P : IProp GF} :
+    ⊢ cinv N γ P -∗ own γ q ==∗ inv N P := by
+  unfold cinv own
+  iintro #Hinv Hown
+  imod iOwn_update (a' := (none, some DFrac.discard)) $$ Hown with #Hdisc
+  · exact .prod _ .id (.option _ _ DFrac.update_discard)
+  imodintro
+  iapply inv_alter $$ Hinv
+  iintro !> !> (⟨$, Hexcl⟩ | Hone)
+  · iintro HP
+    ileft
+    iframe HP Hexcl
+  · iexfalso
+    icombine Hdisc Hone gives %⟨_, H⟩
+    exact absurd (a := (1 : Qp).val < 1) H (by simp)
+
+@[rocq_alias into_inv_cinv]
+instance intoInv_cinv (N : Namespace) (γ : GName) (P : IProp GF) :
+    IntoInv (cinv N γ P) N := {}
+
+set_option synthInstance.checkSynthOrder false in
+@[rocq_alias into_acc_cinv]
+instance intoAcc_cinv (E : CoPset) (N : Namespace) (γ : GName) (P : IProp GF) (p : Qp) :
+    IntoAcc (X := Unit) (cinv N γ P) (↑N ⊆ E) (own γ p) (fupd E (E \ ↑N)) (fupd (E \ ↑N) E)
+      (fun _ => iprop(▷ P ∗ own γ p)) (fun _ => iprop(▷ P)) (fun _ => none) where
+  into_acc := by
+    dsimp only [accessor, Option.getD]
+    iintro %x #Hinv Hown
+    imod acc x $$ Hinv Hown with ⟨HP, Hγ, Hcl⟩
+    imodintro
+    iexists ()
+    isplitl [HP Hγ]
+    · iframe
+    · iintro HP
+      iapply (BIFUpdate.mono true_emp.mp)
+      iapply Hcl $$ HP
 
 end CancelableInvariant
 end Iris

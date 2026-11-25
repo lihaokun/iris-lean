@@ -1,14 +1,17 @@
 /-
-Copyright (c) 2022 Lars König. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Lars König
 -/
 module
 
+public import Iris.Init
+
 @[expose] public section
 
 namespace Prod
 
+set_option linter.checkUnivs false in
 /-- Apply `f` to all elements of a tuple. All elements of the tuple must have the same type `α`. -/
 def mapAllM [Monad M] (f : α → M β) : α × α → M (β × β)
   | (x, y) => do return (← f x, ← f y)

@@ -1,3 +1,7 @@
+/-
+Copyright (c) The Iris-Lean Contributors
+Released under Apache 2.0 license as described in the file LICENSE.
+-/
 module
 public import Iris.Algebra
 public import Iris.Algebra.ReservationMap
@@ -11,7 +15,7 @@ public import Iris.Std.Namespaces
 
 namespace Iris
 
-open Std Iris.Algebra CMRA BI ProofMode
+open Iris.Std Iris.Algebra ORA BI ProofMode
 
 /-! This file provides a generic mechanism for a language-level points-to
 connective `l ↦{dq} v` reflecting the physical heap.  This library is designed
@@ -29,7 +33,7 @@ rationale.  To implement the meta machinery we use two extra pieces of ghost
 state in addition to the value map:
 
 - a `ghost_map L gname`, which associates a ghost name with each location;
-- for each such ghost name, a `ReservationMap (Agree (LeibnizO Pos))` storing
+- for each such ghost name, a `ReservationMap (Agree (DiscreteO Pos))` storing
   the actual meta data.  The indirection is required so that `meta_set` is a
   frame-preserving update that does not need to inspect `genHeapInterp`. -/
 
@@ -38,8 +42,8 @@ Following the convention from `WSat`, we fix the representation to extensional
 tree maps over positives. -/
 abbrev MetaResMap (x : Sort _) : Sort _ := Std.ExtTreeMap Pos x compare
 
-/-- The CMRA used to store the meta-data attached to a single location. -/
-abbrev MetaUR : Sort _ := ReservationMap (Agree (LeibnizO Pos)) MetaResMap
+/-- The ORA used to store the meta-data attached to a single location. -/
+abbrev MetaUR : Sort _ := ReservationMap (Agree (DiscreteO Pos)) MetaResMap
 
 @[rocq_alias gen_heapGpreS]
 class genHeapPreS (L V : Type _) (GF : BundledGFunctors) (H : outParam <| Type _ → Type _)
@@ -85,12 +89,20 @@ def pointsTo (l : L) (dq : DFrac) (v : V) : IProp GF := heapName ↪◯MAP[l]{dq
 notation:50 l:50 " ↦{" dq "} " v:50 => pointsTo l dq v
 notation:50 l:50 " ↦ " v:50 => pointsTo l (DFrac.own 1) v
 
+#rocq_ignore pointsto_def "Rocq unsealed definition body; use pointsTo."
+#rocq_ignore pointsto_aux "Rocq sealing auxiliary definition."
+#rocq_ignore pointsto_unseal "Rocq unsealing lemma."
+
 /-- The token witnessing that no meta data has been associated with the
 namespace mask `E` at location `l`. -/
 @[rocq_alias meta_token]
 def metaToken (l : L) (E : CoPset) : IProp GF := iprop%
   ∃ γm, (metaName ↪◯MAP[l]{.discard} γm) ∗
     iOwn (E := genHeapPreS.metaData (L := L) (V := V)) γm (ReservationMap.mkToken E)
+
+#rocq_ignore meta_token_def "Rocq unsealed definition body; use metaToken."
+#rocq_ignore meta_token_aux "Rocq sealing auxiliary definition."
+#rocq_ignore meta_token_unseal "Rocq unsealing lemma."
 
 /-- Persistent assertion that the meta-data `x : A` has been associated with
 namespace `N` to the location `l`.  The type `A` must be `Pos.Countable`. -/
@@ -100,6 +112,10 @@ def metaInfo [Pos.Countable A] (l : L) (N : Namespace) (x : A) : IProp GF := ipr
     iOwn (E := genHeapPreS.metaData (L := L) (V := V)) γm
       (.singleton (CoPset.pick (↑N)) (toAgree ⟨Pos.Countable.encode x⟩))
 
+#rocq_ignore meta_def "Rocq unsealed definition body; use metaInfo."
+#rocq_ignore meta_aux "Rocq sealing auxiliary definition."
+#rocq_ignore meta_unseal "Rocq unsealing lemma."
+
 end definitions
 
 section lemmas
@@ -107,6 +123,7 @@ section lemmas
 variable {GF : BundledGFunctors}
 variable {L V : Type _} {H : outParam <| Type _ → Type _} [Std.LawfulFiniteMap H L]
 variable [genHeapGS L V GF H]
+local bi (IProp GF)
 
 open genHeapGS Std.PartialMap Std.FiniteMap
 
@@ -121,12 +138,12 @@ instance instFractionalPointsTo : Fractional (l ↦{.own ·} v) :=
   inferInstanceAs (Fractional (heapName ↪◯MAP[l]{.own ·} v))
 
 @[rocq_alias pointsto_as_fractional]
-instance instAsFractionalPointsTo : AsFractional (l ↦{.own q} v) (l ↦{.own ·} v) q :=
+instance instAsFractionalPointsTo : AsFractional (l ↦{.own q} v) ioΦ (l ↦{.own ·} v) ioq q :=
   inferInstanceAs
-    (AsFractional (heapName ↪◯MAP[l]{.own q} v) (heapName ↪◯MAP[l]{.own ·} v) q)
+    (AsFractional (heapName ↪◯MAP[l]{.own q} v) ioΦ (heapName ↪◯MAP[l]{.own ·} v) ioq q)
 
 @[rocq_alias pointsto_valid]
-theorem pointsTo_cmraValid : l ↦{dq} v ⊢@{IProp GF} ⌜✓ dq⌝ := by
+theorem pointsTo_cmraValid : l ↦{dq} v ⊢ ⌜✓ dq⌝ := by
   unfold pointsTo
   iintro H
   ihave %_ := ghost_map_elem_valid $$ H
@@ -134,56 +151,82 @@ theorem pointsTo_cmraValid : l ↦{dq} v ⊢@{IProp GF} ⌜✓ dq⌝ := by
 
 @[rocq_alias pointsto_valid_2]
 theorem pointsTo_op_cmraValid :
-    l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢@{IProp GF} ⌜✓ (dq₁ • dq₂)⌝ ∧ ⌜v₁ = v₂⌝ := by
+    l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢ ⌜✓ (dq₁ • dq₂)⌝ ∧ ⌜v₁ = v₂⌝ := by
   unfold pointsTo
   iintro H
   ihave %_ := ghost_map_elem_valid_2 $$ H
   itrivial
 
 @[rocq_alias pointsto_agree]
-theorem pointsTo_agree : l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢@{IProp GF} ⌜v₁ = v₂⌝ := by
+theorem pointsTo_agree : l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢ ⌜v₁ = v₂⌝ := by
   unfold pointsTo
   iapply ghost_map_elem_agree
 
+@[rocq_alias pointsto_combine_sep_gives]
+instance instCombineSepGivesPointsTo (l : L) (dq₁ dq₂ : DFrac) (v₁ v₂ : V) :
+    CombineSepGives (l ↦{dq₁} v₁) (l ↦{dq₂} v₂) iprop(⌜✓ (dq₁ • dq₂) ∧ v₁ = v₂⌝) :=
+  inferInstanceAs (CombineSepGives (heapName ↪◯MAP[l]{dq₁} v₁) (heapName ↪◯MAP[l]{dq₂} v₂) _)
+
 @[rocq_alias pointsto_combine]
 theorem pointsTo_combine :
-    l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢@{IProp GF} l ↦{dq₁ • dq₂} v₁ ∗ ⌜v₁ = v₂⌝ := by
+    l ↦{dq₁} v₁ ∗ l ↦{dq₂} v₂ ⊢ l ↦{dq₁ • dq₂} v₁ ∗ ⌜v₁ = v₂⌝ := by
   unfold pointsTo
   iintro ⟨H₁, H₂⟩
   iapply ghost_map_elem_combine $$ H₁ H₂
 
+/-- Lower priority than `combineSepAsFractional`, which kicks in for `DFrac.own`. -/
+@[rocq_alias pointsto_combine_as]
+instance (priority := default - 15) instCombineSepAsPointsTo
+    (l : L) (dq₁ dq₂ : DFrac) (v₁ v₂ : V) :
+    CombineSepAs (l ↦{dq₁} v₁) (l ↦{dq₂} v₂) (l ↦{dq₁ • dq₂} v₁) :=
+  inferInstanceAs (CombineSepAs (heapName ↪◯MAP[l]{dq₁} v₁) (heapName ↪◯MAP[l]{dq₂} v₂) _)
+
 @[rocq_alias pointsto_frac_ne]
 theorem pointsTo_frac_ne {l₁ l₂ : L} {dq₁ dq₂ : DFrac} {v₁ v₂ : V}
     (Hk : ¬ ✓ (dq₁ • dq₂)) :
-    ⊢@{IProp GF} l₁ ↦{dq₁} v₁ -∗ l₂ ↦{dq₂} v₂ -∗ ⌜l₁ ≠ l₂⌝ := by
+    ⊢ l₁ ↦{dq₁} v₁ -∗ l₂ ↦{dq₂} v₂ -∗ ⌜l₁ ≠ l₂⌝ := by
   unfold pointsTo
   iapply ghost_map_elem_frac_ne (Hk := Hk)
 
 @[rocq_alias pointsto_ne]
 theorem pointsTo_ne {l₁ l₂ : L} {dq₂ : DFrac} {v₁ v₂ : V} :
-    ⊢@{IProp GF} l₁ ↦ v₁ -∗ l₂ ↦{dq₂} v₂ -∗ ⌜l₁ ≠ l₂⌝ := by
+    ⊢ l₁ ↦ v₁ -∗ l₂ ↦{dq₂} v₂ -∗ ⌜l₁ ≠ l₂⌝ := by
   unfold pointsTo
   iapply ghost_map_elem_ne
 
 /-- Permanently turn any points-to predicate into a persistent points-to. -/
 @[rocq_alias pointsto_persist]
 theorem pointsTo_persist {l : L} {dq : DFrac} {v : V} :
-    ⊢@{IProp GF} l ↦{dq} v ==∗ l ↦{.discard} v := by
+    ⊢ l ↦{dq} v ==∗ l ↦{.discard} v := by
   unfold pointsTo
   iapply ghost_map_elem_persist
 
 /-- Recover fractional ownership of a read-only element. -/
 @[rocq_alias pointsto_unpersist]
 theorem pointsTo_unpersist {l : L} {v : V} :
-    ⊢@{IProp GF} l ↦{.discard} v ==∗ ∃ q, l ↦{.own q} v := by
+    ⊢ l ↦{.discard} v ==∗ ∃ q, l ↦{.own q} v := by
   unfold pointsTo
   iapply ghost_map_elem_unpersist
+
+@[rocq_alias pointsto_persistent]
+instance instPersistentPointsTo (l : L) (v : V) :
+    BI.Persistent (l ↦{.discard} v) := by
+  unfold pointsTo
+  infer_instance
+
+/-! ### Framing support -/
+
+@[rocq_alias frame_pointsto]
+instance (priority := high) instFramePointsTo (p : Bool) (l : L) (v : V) (q₁ q₂ r : Qp)
+    [FrameFractionalQp q₁ q₂ r] :
+    Frame p (l ↦{.own q₁} v) (l ↦{.own q₂} v) (l ↦{.own r} v) :=
+  frame_fractional (l ↦{.own ·} v) q₁ q₂ r
 
 /-! ### General properties of `metaInfo` and `metaToken` -/
 
 @[rocq_alias meta_token_timeless]
 instance instTimelessMetaToken (l : L) (E : CoPset) :
-    BI.Timeless (PROP := IProp GF) (metaToken l E) := by
+    BI.Timeless (metaToken l E) := by
   unfold metaToken
   refine @BI.exists_timeless _ _ _ _ ?_
   intro γm
@@ -191,7 +234,7 @@ instance instTimelessMetaToken (l : L) (E : CoPset) :
 
 @[rocq_alias meta_timeless]
 instance instTimelessMeta {A : Type _} [Pos.Countable A] (l : L) (N : Namespace) (x : A) :
-    BI.Timeless (PROP := IProp GF) (metaInfo l N x) := by
+    BI.Timeless (metaInfo l N x) := by
   unfold metaInfo
   refine @BI.exists_timeless _ _ _ _ ?_
   intro γm
@@ -199,7 +242,7 @@ instance instTimelessMeta {A : Type _} [Pos.Countable A] (l : L) (N : Namespace)
 
 @[rocq_alias meta_persistent]
 instance instPersistentMeta {A : Type _} [Pos.Countable A] (l : L) (N : Namespace) (x : A) :
-    BI.Persistent (PROP := IProp GF) (metaInfo l N x) := by
+    BI.Persistent (metaInfo l N x) := by
   unfold metaInfo
   refine @BI.exists_persistent _ _ _ _ ?_
   intro γm
@@ -211,7 +254,7 @@ theorem metaToken_union_1 {l : L} {E1 E2 : CoPset} (he : E1 ## E2) :
   unfold metaToken
   iintro ⟨%γm, #Hγm, Hm⟩
   -- TODO: why do we need to destruct in a second step?
-  icases (iOwn_ne.eqv (ReservationMap.token_union he).symm) $$ Hm with Hm
+  icases (congrArg (iOwn _) (ReservationMap.token_union he).symm) $$ Hm with Hm
   icases Hm with ⟨Hm1, Hm2⟩
   isplitl [Hm1]
   · iexists γm
@@ -230,7 +273,7 @@ theorem metaToken_union_2 {l : L} {E1 E2 : CoPset} :
   have hdisj : E1 ## E2 := ReservationMap.valid_token_op_iff_disj.mp Hvalid
   iexists γm1
   iframe Hγm1
-  iapply (equiv_iff.mp (iOwn_ne.eqv (ReservationMap.token_union hdisj))).mpr
+  iapply (congrArg (iOwn _) (ReservationMap.token_union hdisj))
   iapply iOwn_op
   iframe
 
@@ -254,7 +297,7 @@ theorem metaToken_valid_2 {l : L} {E1 E2 : CoPset} :
 
 @[rocq_alias meta_token_combine_as]
 instance instCombineSepGivesMetaToken (l : L) (E1 E2 : CoPset) :
-    CombineSepGives (PROP := IProp GF) (metaToken l E1) (metaToken l E2) iprop(⌜E1 ## E2⌝) where
+    CombineSepGives (metaToken l E1) (metaToken l E2) iprop(⌜E1 ## E2⌝) where
   combine_sep_gives := by
     iintro ⟨H1, H2⟩
     icases metaToken_valid_2 $$ H1 H2 with %H
@@ -287,16 +330,16 @@ theorem meta_agree {A : Type _} [Pos.Countable A] {l : L} {N : Namespace} {x1 x2
   subst Heq
   icombine Hm1 Hm2 gives %Hvalid
   ipureintro
-  rw [valid_iff (ReservationMap.singleton_op _ _ _).symm
+  rw [(ReservationMap.singleton_op _ _ _).symm
     , ReservationMap.valid_singleton, toAgree_op_valid_iff_eq] at Hvalid
-  exact Pos.encode_inj (LeibnizO.eqv_inj Hvalid)
+  exact Pos.encode_inj (DiscreteO.eqv_inj Hvalid)
 
 @[rocq_alias meta_set]
 theorem meta_set {A : Type _} [Pos.Countable A] {l : L} {E : CoPset} {N : Namespace} (x : A)
     (he : (↑N : CoPset) ⊆ E) : metaToken (GF := GF) l E ==∗ metaInfo l N x := by
   unfold metaToken metaInfo
   iintro ⟨%γm, #Hγm, Hm⟩
-  imod iOwn_update (ReservationMap.alloc (a := toAgree (⟨Pos.Countable.encode x⟩ : LeibnizO Pos))
+  imod iOwn_update (ReservationMap.alloc (a := toAgree (⟨Pos.Countable.encode x⟩ : DiscreteO Pos))
     (he _ (coPpick_nclose N)) Agree.toAgree_valid) $$ Hm with Hm
   imodintro
   iexists γm
@@ -330,7 +373,7 @@ theorem meta_metaToken_valid' {A : Type _} [Pos.Countable A] {l : L} {N : Namesp
 @[rocq_alias combine_sep_gives_meta_meta_token_1]
 instance instCombineSepGivesMetaMetaToken1 {A : Type _} [Pos.Countable A]
     (l : L) (N : Namespace) (x : A) (E : CoPset) :
-    CombineSepGives (PROP := IProp GF) (metaInfo l N x) (metaToken l E)
+    CombineSepGives (metaInfo l N x) (metaToken l E)
       iprop(⌜¬ (↑N : CoPset) ⊆ E⌝) where
   combine_sep_gives := by
     iintro ⟨H1, H2⟩
@@ -340,7 +383,7 @@ instance instCombineSepGivesMetaMetaToken1 {A : Type _} [Pos.Countable A]
 @[rocq_alias combine_sep_gives_meta_meta_token_2]
 instance instCombineSepGivesMetaMetaToken2 {A : Type _} [Pos.Countable A]
     (l : L) (N : Namespace) (x : A) (E : CoPset) :
-    CombineSepGives (PROP := IProp GF) (metaToken l E) (metaInfo l N x)
+    CombineSepGives (metaToken l E) (metaInfo l N x)
       iprop(⌜¬ (↑N : CoPset) ⊆ E⌝) where
   combine_sep_gives := by
     iintro ⟨H1, H2⟩

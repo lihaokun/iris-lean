@@ -1,5 +1,5 @@
 /-
-Copyright (c) 2026 Haokun Li. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Haokun Li, Sergei Stepanenko, Zongyuan Liu
 -/
@@ -13,9 +13,11 @@ public import Iris.Std.FromMathlib
 
 namespace Iris.ProgramLogic
 
-open Iris OFE COFE BI Iris.BI Iris.Algebra Std FromMathlib LawfulSet
+open Iris OFE COFE BI Iris.BI Iris.Algebra Iris.Std FromMathlib LawfulSet
 open Iris.ProgramLogic.PrimStep
 open Language.Notation
+
+local bi (IProp GF)
 
 @[expose] public section
 
@@ -126,7 +128,7 @@ theorem wptp_preservation (s : Stuckness) (n : Nat) (es1 es2 : List Expr)
   induction Hsteps generalizing nt κs' Φs ns es1 σ1 es2 σ2 with
   | refl ρ =>
     cases hρ1; cases hρ2
-    simp only [Nat.zero_add, List.nil_append, steps_sum, Nat.repeat]
+    simp only [Nat.zero_add, List.nil_append, steps_sum, step_fupdN]
     iintro Hσ _ Hwptp
     iapply fupd_mask_intro empty_subset
     iintro Hcl; imod Hcl; imodintro
@@ -139,7 +141,7 @@ theorem wptp_preservation (s : Stuckness) (n : Nat) (es1 es2 : List Expr)
     cases ρ_mid with | mk e_mid σ_mid =>
     rw [List.append_assoc obs obs' κs']
     dsimp only [steps_sum]
-    rw [Nat.repeat_add]
+    rw [step_fupdN_add.to_eq]
     iintro Hσ ⟨Hcred1, Hcred2⟩ Hwptp
     icases wptp_step s es1 e_mid obs (obs' ++ κs') σ1 σ_mid ns Φs nt hstep
             $$ Hσ Hcred1 Hwptp with ⟨%nt'_step, >Hwptp_step⟩
@@ -157,7 +159,7 @@ theorem wptp_preservation (s : Stuckness) (n : Nat) (es1 es2 : List Expr)
     iframe HSI' Hwptp'
 
 @[rocq_alias wptp_postconditions]
-theorem wptp_postconditions (Φs : List (Val → IProp GF)) (s : Stuckness) (es : List Expr):
+theorem wptp_postconditions (Φs : List (Val → IProp GF)) (s : Stuckness) (es : List Expr) :
     wptp s es Φs ={⊤}=∗ [∗list] e;Φ ∈ es;Φs, (toVal e).elim iprop(True) Φ := by
   iintro Ht
   iapply BigSepL2.bigSepL2_fupd
@@ -192,7 +194,7 @@ theorem wp_strong_adequacy_gen [InvGpreS GF] (s : Stuckness) (es : List Expr) (�
     φ := by
   apply pure_soundness (PROP := IProp GF)
   apply laterN_soundness (n := steps_sum numLaters 0 n + 1)
-  rw [(laterN_later _).to_eq]
+  rw [(laterN_succ_right _).to_eq]
   refine Entails.trans ?_ (laterN_mono _ except0_into_later)
   apply fupd_finally_soundness hlc (steps_sum numLaters 0 n) ⊤
   iintro %Hinv Hf
@@ -221,7 +223,7 @@ theorem wp_strong_adequacy_gen [InvGpreS GF] (s : Stuckness) (es : List Expr) (�
   rw [List.length_replicate] at Hlen2; subst Hlen2
   simp only [Nat.zero_add]
   icases BigSepL2.bigSepL2_replicate_right $$ Ht2' with Ht2'
-  icases (equiv_iff.mp <| BigSepL.bigSepL_filterMap toVal).mpr $$ [Ht2'] with Ht2'
+  icases (BigSepL.bigSepL_filterMap toVal) $$ [Ht2'] with Ht2'
   · iapply BigSepL.bigSepL_mono $$ Ht2'
     intros; rcases (toVal _)
     simp only [Option.elim_none]
@@ -234,14 +236,18 @@ theorem wp_strong_adequacy_gen [InvGpreS GF] (s : Stuckness) (es : List Expr) (�
 abbrev wp_strong_adequacy := @wp_strong_adequacy_gen .hasLC
 
 @[rocq_alias adequate]
-structure adequate (s : Stuckness) (e1 : Expr) (σ1 : State)
-    (φ : Val → State → Prop) : Prop where
+structure adequate (s : Stuckness) (e1 : Expr) (σ1 : State) (φ : Val → State → Prop) : Prop where
   adequate_result :
     ∀ (t2 : List Expr) (σ2 : State) (v2 : Val),
         ([e1], σ1) -·->ₜₚ* (ToVal.ofVal v2 :: t2, σ2) → φ v2 σ2
   adequate_not_stuck :
     ∀ (t2 : List Expr) (σ2 : State) (e2 : Expr),
       s = .NotStuck → ([e1], σ1) -·->ₜₚ* (t2, σ2) → e2 ∈ t2 → NotStuck (e2, σ2)
+
+structure AdequateNoFork (s : Stuckness) (e₁ : Expr) (σ₁ : State) (φ : Val → State → Prop) : Prop where
+  no_fork {t₂ σ₂} : ([e₁], σ₁) -·->ₜₚ* (t₂, σ₂) → t₂.length = 1
+  result {t₂ σ₂ v₂} : ([e₁], σ₁) -·->ₜₚ* (ToVal.ofVal v₂ :: t₂, σ₂) → φ v₂ σ₂
+  not_stuck {t₂ σ₂ e₂} : s = .NotStuck → ([e₁], σ₁) -·->ₜₚ* (t₂, σ₂) → e₂ ∈ t₂ → NotStuck ⟨e₂, σ₂⟩
 
 @[rocq_alias adequate_alt]
 theorem adequate_alt (s : Stuckness) (e1 : Expr) (σ1 : State)
@@ -274,6 +280,25 @@ theorem adequate_tp_safe (e1 : Expr) (t2 : List Expr) (σ1 σ2 : State)
     obtain ⟨t2', t2'', rfl⟩ := List.append_of_mem hel
     exact .inr ⟨t2' ++ e3 :: t2'' ++ efs, σ3, obs, Language.Step.of_primStep hstep⟩
 
+theorem adequateNoFork_step {e₁ e₂ : Expr} {σ₁ σ₂ s Q}
+    (Hstep : ([e₁], σ₁) -·->ₜₚ* ([e₂], σ₂)) (H : AdequateNoFork s e₁ σ₁ Q) :
+    AdequateNoFork s e₂ σ₂ Q :=
+  ⟨(H.no_fork <| Hstep.trans ·), (H.result <| Hstep.trans ·), (H.not_stuck · <| Hstep.trans ·)⟩
+
+theorem adequateNoFork_primStep {e₁ e₂ : Expr} {κ σ₁ σ₂ s Q}
+    (Hstep : (e₁, σ₁) -<κ>-> (e₂, σ₂, []))
+    (H : AdequateNoFork s e₁ σ₁ Q) : AdequateNoFork s e₂ σ₂ Q :=
+  adequateNoFork_step (.tail .refl ⟨κ, .of_primStep Hstep (t₁ := []) (t₂ := [])⟩) H
+
+theorem adequateNoFork_efs_nil {e₁ : Expr} {σ₁ s φ} (H : AdequateNoFork s e₁ σ₁ φ)
+    {t₂ σ₂ e₂} (Hsteps : ([e₁], σ₁) -·->ₜₚ* (t₂, σ₂)) (Hmem : e₂ ∈ t₂)
+    {κ e' σ' efs} (Hstep : (e₂, σ₂) -<κ>-> (e', σ', efs)) : efs = [] := by
+  obtain ⟨t₂a, t₂b, rfl⟩ := List.append_of_mem Hmem
+  have Hlen := H.no_fork (Hsteps.tail ⟨κ, .atomic Hstep t₂a t₂b⟩)
+  refine List.length_eq_zero_iff.mp ?_
+  simp [List.length_append] at Hlen
+  omega
+
 omit iG in
 @[rocq_alias wp_adequacy_gen]
 theorem wp_adequacy_gen [InvGpreS GF] (s : Stuckness) (e : Expr) (σ : State) (φ : Val → Prop)
@@ -292,12 +317,12 @@ theorem wp_adequacy_gen [InvGpreS GF] (s : Stuckness) (e : Expr) (σ : State) (�
   apply wp_strong_adequacy_gen (GF := GF) (hlc := hlc) s (Hsteps := hsteps) (numLaters := fun _ => 0)
   iintro %Hinv
   imod Hwp κs with ⟨%Hst, %Hfork, ⟨Hst, Hwp⟩⟩
-  iexists (λ σ _ κs _ => Hst σ κs), [(λ v => iprop(⌜φ v⌝))], Hfork, (fun _ _ _ _ => fupd_intro)
+  iexists (fun σ _ κs _ => Hst σ κs), [(fun v => iprop(⌜φ v⌝))], Hfork, (fun _ _ _ _ => fupd_intro)
   dsimp only
   imodintro
   iframe
-  isplitl [Hwp]
-  · iapply BigSepL2.bigSepL2_singleton; iframe
+  isplitl
+  · iapply BigSepL2.bigSepL2_nil; itrivial
   iintro %_ %_ %Heq %_ %HNS Hst Hwptp _
   iapply fupd_mask_intro_discard empty_subset
   icases BigSepL2.bigSepL2_cons_inv_right $$ Hwptp with ⟨%e', %_, %Heq', Hpost, H⟩
@@ -331,7 +356,7 @@ theorem wp_invariance_gen [InvGpreS GF] (s : Stuckness) (e1 : Expr) (σ1 σ2 : S
   apply wp_strong_adequacy_gen (GF := GF) (hlc := hlc) s (Hsteps := hsteps) (numLaters := fun _ => 0)
   iintro %Hinv
   imod Hwp κs with ⟨%Hst, %Hfork, ⟨Hst, Hwp, Hcont⟩⟩
-  iexists ((λ σ _ => Hst σ)), [(λ _ => iprop(True))], Hfork, (fun _ _ _ _ => fupd_intro)
+  iexists ((fun σ _ => Hst σ)), [(fun _ => iprop(True))], Hfork, (fun _ _ _ _ => fupd_intro)
   dsimp only
   imodintro
   iframe Hst

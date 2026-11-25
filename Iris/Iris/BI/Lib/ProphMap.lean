@@ -1,5 +1,5 @@
 /-
-Copyright (c) Markus de Medeiros 2026. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Markus de Medeiros
 -/
@@ -12,7 +12,7 @@ public import Iris.Std.GenSets
 
 namespace Iris
 
-open Std PartialMap LawfulPartialMap LawfulSet Iris.Algebra CMRA BI ProofMode
+open Iris.Std PartialMap LawfulPartialMap LawfulSet Iris.Algebra ORA BI ProofMode
 
 /-! This file defines prophecy-variable bookkeeping.
 A prophecy map associates to each (used) prophecy `p : P` the list of values it
@@ -127,11 +127,12 @@ variable {GF : BundledGFunctors} {P V : Type _}
 variable {H : outParam <| Type _ → Type _} [LawfulFiniteMap H P]
 variable {S : Type _} [LawfulSet S P]
 variable [prophMapGS P V GF H]
+local bi (IProp GF)
 
 /-! ### General properties of `proph` -/
 
 @[rocq_alias proph_timeless]
-instance instTimelessProph (p : P) (vs : List V) : Timeless (PROP := IProp GF) (proph p vs) :=
+instance instTimelessProph (p : P) (vs : List V) : Timeless (proph p vs) :=
   inferInstanceAs (Timeless (prophMapGS.prophMapName ↪◯MAP[p] vs))
 
 @[rocq_alias proph_exclusive]
@@ -174,7 +175,7 @@ theorem resolve_proph [DecidableEq P] (p : P) (v : V) (pvs : ProphValList P V) (
   iintro ⟨⟨%R, ⟨%Hres, %Hdom⟩, Hauth⟩, Hp⟩
   icombine Hauth Hp gives %HR
   have Hvs : vs = v :: prophListResolves pvs p := by
-    rw [Hres p vs HR, prophListResolves, if_pos rfl]
+    rw [Hres p vs HR, prophListResolves, ite_eq_left rfl]
   subst Hvs
   imod ghost_map_update (prophListResolves pvs p) $$ Hauth Hp with ⟨Hauth, Hfrag⟩
   imodintro
@@ -190,7 +191,7 @@ theorem resolve_proph [DecidableEq P] (p : P) (v : V) (pvs : ProphValList P V) (
       rw [get?_insert_eq rfl] at HEq
       exact (Option.some_inj.mp HEq).symm
     · rw [get?_insert_ne h] at HEq
-      rw [Hres q ws HEq, prophListResolves, if_neg (Ne.symm h)]
+      rw [Hres q ws HEq, prophListResolves, ite_eq_right (Ne.symm h)]
   · have hp : p ∈ ps := Hdom p (by simp [dom, HR])
     rcases dom_insert_iff.mp hq with rfl | hq
     · exact hp

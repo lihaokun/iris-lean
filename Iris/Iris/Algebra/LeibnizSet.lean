@@ -1,40 +1,50 @@
 /-
-Copyright (c) 2026 Sergei Stepanenko. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Sergei Stepanenko, Zongyuan Liu
 -/
 module
 
+public import Iris.Algebra.BigOp
 public import Iris.Algebra.CMRA
-public import Iris.Algebra.OFE
+public import Iris.Algebra.StepIndexFinite
 public import Iris.Algebra.LocalUpdates
 public import Iris.Algebra.Updates
 public import Iris.Std.GenSets
 public import Iris.Std.Infinite
 public import Iris.Std.CoPset
-meta import Iris.Std.RocqPorting
 
 @[expose] public section
+
+local stepindex Nat
 
 /-! ## Leibniz Set algebras
 This file defines generic set algebras.
 This generic construction specializes to both the union and disjoint-union set CMRAs.
 All sets are given the discrete Leibniz OFE, and as a consequence, is not related to any
-OFE/CMRA on the element type.
+OFE/ORA on the element type.
 -/
 
-open Iris Std CMRA OFE LawfulSet
+open Iris Std ORA OFE LawfulSet
 
 inductive DisjointLeibnizSet (S : Type _) where
   | valid : S → DisjointLeibnizSet S
   | error : DisjointLeibnizSet S
 
-instance : COFE (DisjointLeibnizSet S) := COFE.ofDiscrete _ Eq_Equivalence
+#rocq_ignore GSet_inj "Use the constructor injectivity lemma DisjointLeibnizSet.valid.inj"
+
+#rocq_ignore set_unfold_gset_eq "std++ `SetUnfold` instance for `set_solver`; no counterpart in Lean"
+#rocq_ignore set_unfold_gset_included
+  "std++ `SetUnfold` instance for `set_solver`; use LeibnizSet.included_iff_subset"
+#rocq_ignore set_unfold_gset_disj_included
+  "std++ `SetUnfold` instance for `set_solver`; use DisjointLeibnizSet.included_iff_subset"
+#rocq_ignore set_unfold_gset_disj_valid_op
+  "std++ `SetUnfold` instance for `set_solver`; use DisjointLeibnizSet.valid_op_iff_disj"
+
+instance : COFE (DisjointLeibnizSet S) := COFE.ofDiscrete _
 
 instance inst_disjointLeibnizSet_DiscreteE {S : Type _} (x : DisjointLeibnizSet S) :
-    DiscreteE x := ⟨id⟩
-
-instance : Leibniz (DisjointLeibnizSet S) := ⟨id⟩
+    DiscreteE x := ⟨fun h => h⟩
 
 instance instEmptyCollectionDisjointLeibnizSet [LawfulSet S A] :
     EmptyCollection (DisjointLeibnizSet S) where
@@ -56,33 +66,25 @@ theorem DisjointLeibnizSet.exist_set_of_mem [LawfulSet S A] {x : DisjointLeibniz
   | .error => by simp [Membership.mem] at h
   | .valid x' => ⟨x', rfl⟩
 
-theorem DisjointLeibnizSet.mem_of_eqv [LawfulSet S A] {a b : DisjointLeibnizSet S}
-    (eqv : a ≡ b) (mx : x ∈ a) : x ∈ b :=
-  match a, b with
-  | .error, _ => False.elim mx
-  | .valid _, .error => by simp at eqv
-  | .valid _, .valid _ => by simpa [← show _ = _ from eqv]
-
 namespace DisjointLeibnizSet
 
 variable {S : Type _} [LawfulSet S A] [DecidableDisj S]
 
-instance : CMRA (DisjointLeibnizSet S) where
+@[instance_reducible] def cmraData : CMRAData (DisjointLeibnizSet S) where
   pcore _ := some (.valid ∅)
   op
     | valid x, valid y => if x ## y then valid (x ∪ y) else error
     | _, _ => error
   ValidN _ | valid _ => True | _ => False
   Valid | valid _ => True | _ => False
-  op_ne.ne _ _ _ H := by rw [H]
-  pcore_ne {_ _ _ cx} _ H := ⟨cx, H, rfl⟩
-  validN_ne H G := H ▸ G
+  op_ne.ne _ _ _ H := by rw [(H : _ = _)]
+  pcore_ne {_ _ _ cx} _ H := ⟨cx, H, .rfl⟩
+  validN_ne H G := (H : _ = _) ▸ G
   valid_iff_validN := ⟨(fun _ => ·), (· 0)⟩
   validN_succ := id
   validN_op_left {_ x y} := by rcases x <;> rcases y <;> simp
   assoc {x y z} := by
     rcases x with (x|_) <;> rcases y with (y|_) <;> rcases z with (z|_) <;> (try · simp)
-    simp only [leibniz]
     by_cases hyz : y ## z <;> by_cases hxy : x ## y <;>
       by_cases hxyzL : x ## y ∪ z <;> by_cases hxyzR : x ∪ y ## z <;>
     all_goals simp only [hyz, hxy, hxyzL, hxyzR, ↓reduceIte, valid.injEq]
@@ -101,32 +103,30 @@ instance : CMRA (DisjointLeibnizSet S) where
       exact hyz h |>.elim
   comm {x y} := by
     rcases x with (x|_) <;> rcases y with (y|_) <;> (try · simp)
-    by_cases H : x ## y
-    · simp [H, disjoint_symm H, union_comm]
-    · simpa [H] using (H <| disjoint_symm ·)
+    by_cases H : x ## y <;> grind only [disjoint_symm, union_comm]
   pcore_op_left {cx x} := by
     rcases x with (x|_) <;> rcases cx with (cx|_) <;> (try · simp)
     rintro ⟨⟩
     simp [disjoint_empty_left]
-  pcore_idem {x cx} := by rcases x with (x|_) <;> rcases cx with (cx|_) <;> simp
-  pcore_op_mono {_ x} := by
-    rcases x with (x|_) <;> rintro ⟨⟩ y
-    exists (.valid ∅)
-    simp [disjoint_empty_left]
-  extend {_ _ y₁ y₂} _ h := ⟨y₁, y₂, ⟨h, rfl, rfl⟩⟩
+  pcore_idem {x cx} := by grind only []
+  extend {_ _ y₁ y₂} _ h := ⟨y₁, y₂, ⟨h, .rfl, .rfl⟩⟩
+  pcore_op_mono h _ := ⟨.valid ∅, by cases h; simp [disjoint_empty_left]⟩
 
-instance instDiscreteDisjointLeibnizSet : CMRA.Discrete (DisjointLeibnizSet S) where
-  discrete_0 := id
+instance : CMRA (DisjointLeibnizSet S) := ofCMRAData DisjointLeibnizSet.cmraData
+
+instance instDiscreteDisjointLeibnizSet : ORA.Discrete (DisjointLeibnizSet S) where
+  discrete_0 := fun h => h
   discrete_valid := id
-
-instance instUCMRADisjointLeibnizSet : UCMRA (DisjointLeibnizSet S) where
+@[instance_reducible] def ucmraData : UCMRAData (DisjointLeibnizSet S) where
   unit := .valid ∅
-  unit_valid := by simp [Valid]
+  unit_valid := trivial
   unit_left_id {x} := by rcases x <;> simp [disjoint_empty_left, op]
   pcore_unit := by simp [pcore]
 
+instance instUCMRADisjointLeibnizSet : UCMRA (DisjointLeibnizSet S) := UORA.ofUCMRAData DisjointLeibnizSet.ucmraData
+
 theorem valid_set {s : S} : ✓ valid s := ⟨⟩
-theorem validN_set {s : S}: ✓{n} valid s := ⟨⟩
+theorem validN_set {s : S} : ✓{n} valid s := ⟨⟩
 
 theorem not_valid_invalid : ¬ ✓ (error : DisjointLeibnizSet S) := False.elim
 theorem not_validN_invalid : ¬ ✓{n} (error : DisjointLeibnizSet S) := False.elim
@@ -145,36 +145,40 @@ theorem mem_iff_of_valid_union {x y : DisjointLeibnizSet S} (v : ✓ x • y) (a
 theorem mem_iff_of_validN_union {x y : DisjointLeibnizSet S} (v : ✓{n} x • y) (a : A) :
     a ∈ x • y ↔ a ∈ x ∨ a ∈ y := mem_iff_of_valid_union v a
 
-@[rocq_alias coPset_disj_included, rocq_alias gset_disj_included]
-theorem included_iff_subset {X Y : S} : valid X ≼ valid Y ↔ X ⊆ Y := by
+theorem ord_iff_subset {X Y : S} : valid X ≼ₒ valid Y ↔ X ⊆ Y := by
   refine ⟨?_, ?_⟩
   · rintro ⟨(Z|_), HZ⟩
     · by_cases H : X ## Z
-      · obtain rfl : Y = X ∪ Z := by simp_all [op]
+      · obtain rfl : Y = X ∪ Z := by have := HZ; simp_all [op]
         exact fun _ => (mem_union.mpr <| .inl ·)
-      · simp [op, H] at HZ
-    · simp [op] at HZ
+      · exact absurd HZ (by simp [op, H])
+    · exact absurd HZ (by simp [op])
   · intro Hsub
     exists valid (Y \ X)
-    suffices Y = X ∪ Y \ X by
+    suffices h : Y = X ∪ Y \ X by
       have H : X ## (Y \ X) := fun _ H => (mem_diff.mp H.2).right H.1
-      simpa [op, H]
+      rw [show (valid X • valid (Y \ X) : DisjointLeibnizSet S) = valid (X ∪ Y \ X) by simp [op, H]]
+      exact congrArg valid h
     ext p; rw [mem_union, mem_diff]
     refine ⟨by grind, (·.casesOn (Hsub _) (·.left))⟩
 
+@[rocq_alias coPset_disj_included, rocq_alias gset_disj_included]
+theorem included_iff_subset {X Y : S} : valid X ≼ valid Y ↔ X ⊆ Y :=
+  inc_iff_ord.trans ord_iff_subset
+
 @[rocq_alias coPset_disj_union, rocq_alias gset_disj_union]
 theorem disj_op_union {X Y : S} (Hdisj : X ## Y) :
-    (valid X) • (valid Y) ≡ valid (X ∪ Y) := by
+    (valid X) • (valid Y) = valid (X ∪ Y) := by
   simp [op, Hdisj]
 
 @[rocq_alias coPset_disj_valid_op, rocq_alias gset_disj_valid_op]
 theorem valid_op_iff_disj {X Y : S} : ✓ ((valid X) • (valid Y)) ↔ X ## Y := by
-  by_cases H : X ## Y <;> simp [H, op, Valid]
+  by_cases H : X ## Y <;> simp [H, op, ORA.Valid]
 
 @[rocq_alias coPset_disj_valid_inv_l, rocq_alias gset_disj_valid_inv_l]
 theorem valid_inv_l {X : S} {Y : DisjointLeibnizSet S} :
     ✓ (valid X) • Y → ∃ Y', Y = valid Y' ∧ X ## Y' := by
-  simp only [op, Valid]
+  simp only [op, ORA.Valid]
   rcases Y with (Y|_) <;> try (· simp)
   by_cases H : X ## Y <;> simp [H]
 
@@ -188,21 +192,21 @@ theorem not_mem_of_mem_and_valid_op_left {x y : DisjointLeibnizSet S} (v : ✓ x
 
 theorem not_mem_of_mem_and_valid_op_right {x y : DisjointLeibnizSet S}
   (v : ✓ x • y) {p : A} (m : p ∈ y)
-    : ¬ p ∈ x := not_mem_of_mem_and_valid_op_left ((OFE.Equiv.valid CMRA.comm).mp v) m
+    : ¬ p ∈ x :=
+  not_mem_of_mem_and_valid_op_left (comm' (x := x) ▸ v) m
 
 @[rocq_alias gset_disj_dealloc_local_update]
 theorem localUpdate_dealloc {X Y : S} : (valid X, valid Y) ~l~> (valid (X \ Y), valid ∅) := by
-  refine LocalUpdate.total_valid fun vx vy inc => ?_
+  refine LocalUpdate.total_valid fun vx vy le => ?_
   refine (local_update_unital_discrete ..).mpr fun z hx heq => ⟨valid_mapN (fun _ _ => vx) vx, ?_⟩
-  rcases z with (z|_) <;> try · cases heq
-  by_cases Hdisj : Y ## z <;> simp only [Hdisj, ↓reduceIte, op, leibniz] at heq
-  · obtain ⟨rfl⟩ := valid.injEq _ _ ▸ heq
-    simp only [op, leibniz, disjoint_empty_left, ↓reduceIte, union_empty_left, valid.injEq] at ⊢
-    ext i
-    rw [mem_diff, mem_union]
-    specialize (Hdisj i)
-    grind
-  · cases heq
+  rcases z with (z|_)
+  · by_cases Hdisj : Y ## z <;> simp only [Hdisj, ↓reduceIte, op] at heq
+    · obtain rfl := valid.inj heq
+      simp only [op, disjoint_empty_left, ↓reduceIte, union_empty_left, valid.injEq]
+      ext i
+      grind [Hdisj i, mem_diff, mem_union]
+    · exact absurd heq (by simp)
+  · exact absurd heq (by simp [op])
 
 @[rocq_alias gset_disj_dealloc_empty_local_update]
 theorem localUpdate_dealloc_empty {X Z : S} :
@@ -220,7 +224,7 @@ theorem localUpdate_dealloc_empty {X Z : S} :
 theorem localUpdate_op_l {X Y Z : S} :
     (valid Z • valid X, valid Z • valid Y) ~l~> (valid X, valid Y) := by
   suffices (valid Z • valid X, valid Z • valid Y) ~l~> (valid X, unit • valid Y) by
-    rwa [show UCMRA.unit • valid Y ≡ valid Y by apply unit_left_id] at this
+    rwa [unit_left_id] at this
   exact LocalUpdate.op_frame _ _ _ _ _ localUpdate_dealloc_empty
 
 @[rocq_alias gset_disj_alloc_op_local_update]
@@ -231,15 +235,16 @@ theorem localUpdate_op_r {X Y Z : S} (Hdisj : Z ## X) :
 @[rocq_alias gset_disj_alloc_local_update]
 theorem localUpdate_union_r_of_disj (X Y Z : S) (Hdisj : Z ## X) :
     (valid X, valid Y) ~l~> (valid (Z ∪ X), valid (Z ∪ Y)) := by
-  refine LocalUpdate.total_valid fun vx vy inc => ?_
-  have HdisjY : Z ## Y := fun a ⟨Hz, Hy⟩ => Hdisj a ⟨Hz, included_iff_subset.mp inc a Hy⟩
+  refine LocalUpdate.total_valid fun vx vy le => ?_
+  have HdisjY : Z ## Y := fun a ⟨Hz, Hy⟩ => Hdisj a ⟨Hz, ord_iff_subset.mp le a Hy⟩
   rw [←disj_op_union Hdisj, ←disj_op_union HdisjY]
   exact localUpdate_op_r Hdisj
 
 @[rocq_alias gset_disj_alloc_empty_local_update]
 theorem localUpdate_alloc_empty_of_disj (X Z : S) (Hdisj : Z ## X) :
-    (valid X, valid ∅) ~l~> (valid (Z ∪ X), valid Z) := by
-  rw [show valid Z ≡ valid (Z ∪ ∅) by simp [union_empty_right]]
+    (valid X, valid ∅) ~l~>
+    (valid (Z ∪ X), valid Z) := by
+  rw [show valid Z = valid (Z ∪ ∅) by simp [union_empty_right]]
   exact localUpdate_union_r_of_disj X ∅ Z Hdisj
 
 @[rocq_alias gset_disj_alloc_updateP_strong]
@@ -310,19 +315,18 @@ end DisjointLeibnizSet
 inductive LeibnizSet (S : Type _) where
   | valid (s : S)
 
-instance : COFE (LeibnizSet S) := COFE.ofDiscrete _ Eq_Equivalence
-instance : Leibniz (LeibnizSet S) := ⟨id⟩
+instance : COFE (LeibnizSet S) := COFE.ofDiscrete _
 
 namespace LeibnizSet
 
 variable {S : Type _} [LawfulSet S A]
 
-instance : CMRA (LeibnizSet S) where
+@[instance_reducible] def cmraData : CMRAData (LeibnizSet S) where
   pcore := some
   op | .valid x, valid y => valid (x ∪ y)
   ValidN _ _ := True
   Valid _ := True
-  op_ne.ne _ _ _ H := by rw [H]
+  op_ne.ne _ _ _ H := by rw [(H : _ = _)]
   pcore_ne {_ _ _} _ H1 H2 :=  ⟨_, rfl, .trans (.of_eq <| Option.some.injEq _ _ ▸ H2.symm) H1⟩
   validN_ne _ _ := by simp
   valid_iff_validN := by simp
@@ -332,44 +336,49 @@ instance : CMRA (LeibnizSet S) where
   comm := by simp [union_comm]
   pcore_op_left {_ _} := by rintro ⟨rfl⟩; simp [union_idem]
   pcore_idem := by simp
+  extend {_ _ _ _} _ h := ⟨_, _, h, .rfl, .rfl⟩
   pcore_op_mono {_ _} := by rintro ⟨rfl⟩ y; exists y
-  extend {_ _ _ _} _ := (⟨_, _, ⟨·, rfl, rfl⟩⟩)
 
-instance : UCMRA (LeibnizSet S) where
+instance : CMRA (LeibnizSet S) := ofCMRAData LeibnizSet.cmraData
+
+@[instance_reducible] def ucmraData : UCMRAData (LeibnizSet S) where
   unit := valid ∅
-  unit_valid := by simp [Valid]
+  unit_valid := trivial
   unit_left_id := by simp [op, union_empty_left]
   pcore_unit := by simp [pcore, pcore]
 
-instance instDiscreteLeibnizSet : CMRA.Discrete (LeibnizSet S) where
-  discrete_0 := id
-  discrete_valid := id
+instance instUnital : UCMRA (LeibnizSet S) := UORA.ofUCMRAData LeibnizSet.ucmraData
 
+instance instDiscreteLeibnizSet : ORA.Discrete (LeibnizSet S) where
+  discrete_0 := fun h => h
+  discrete_valid := id
 @[rocq_alias gset_core_id]
-instance instCoreIdLeibnizSet (X : LeibnizSet S) : CMRA.CoreId X := ⟨.rfl⟩
+instance instCoreIdLeibnizSet (X : LeibnizSet S) : CoreId X := ⟨rfl⟩
 
 @[rocq_alias coPset_op, rocq_alias gset_op]
-theorem op_union (X Y : S) : (valid X) • (valid Y) ≡ valid (X ∪ Y) := by simp [op]
+theorem op_union (X Y : S) : (valid X) • (valid Y) = valid (X ∪ Y) := by simp [op]
 
 @[rocq_alias coPset_core, rocq_alias gset_core]
-theorem core_equiv (X : LeibnizSet S) : core X ≡ X := by
-  change (pcore X).getD X ≡ X
+theorem core_equiv (X : LeibnizSet S) : core X = X := by
+  change (pcore X).getD X = X
   simp [pcore]
 
-@[rocq_alias coPset_included, rocq_alias gset_included]
-theorem included_iff_subset (X Y : S) : valid X ≼ valid Y ↔ X ⊆ Y := by
-  simp only [Included, op]
+theorem ord_iff_subset (X Y : S) : valid X ≼ₒ valid Y ↔ X ⊆ Y := by
+  simp only [Order, Included, op]
   refine ⟨fun ⟨_, H⟩ => ?_, fun Hsub => ?_⟩
-  · rcases H with ⟨rfl⟩
+  · obtain ⟨rfl⟩ := H
     exact fun _ Hp => mem_union.mpr (.inl Hp)
   · exists valid (Y \ X)
-    refine .of_eq ?_
     congr 1; ext p
     rw [mem_union, mem_diff]
     refine ⟨fun H1 => ?_, (·.casesOn (Hsub _) (·.left))⟩
     by_cases H : (p ∈ X)
     · exact .inl H
     · exact .inr ⟨H1, H⟩
+
+@[rocq_alias coPset_included, rocq_alias gset_included]
+theorem included_iff_subset (X Y : S) : valid X ≼ valid Y ↔ X ⊆ Y :=
+  inc_iff_ord.trans (ord_iff_subset X Y)
 
 @[rocq_alias coPset_opM, rocq_alias gset_opM]
 theorem opM_union (X : LeibnizSet S) (mY : Option (LeibnizSet S)) :
@@ -387,17 +396,31 @@ theorem localUpdate (X Y X' : S) (H : X ⊆ X') :
   match mz with
   | none => rfl
   | some (.valid Z) =>
-    simp only [op?, op, leibniz, valid.injEq] at e ⊢
-    have hZ : Z ⊆ X' := subset_trans union_subset_right (e ▸ H)
+    simp only [op?, op] at e ⊢
+    have hZ : Z ⊆ X' := subset_trans union_subset_right (valid.inj e ▸ H)
     rw [union_comm, union_subset_absorption hZ]
+
+end LeibnizSet
+
+namespace LeibnizSet
+open Algebra
+
+variable {S : Type _} [LawfulFiniteSet S A]
+
+@[rocq_alias big_opS_singletons]
+theorem bigOpS_singletons (X : S) :
+    ([^ op set] x ∈ X, (valid {x} : LeibnizSet S)) = .valid X := by
+  induction X using FiniteSet.set_ind with
+  | hemp => exact BigOpS.bigOpS_empty
+  | hadd x X hx ih => rw [insert_union, BigOpS.bigOpS_insert hx, ih, op_union]
 
 end LeibnizSet
 
 /-! ## The CoPset CMRAs
 
-The two resource algebras over `CoPset`, obtained as instances of the generic set-CMRA construction above. -/
+The two resource algebras over `CoPset`, obtained as instances of the generic set-ORA construction above. -/
 
-/-- The union CMRA over `CoPset`: every element is valid and composition is set union. -/
+/-- The union ORA over `CoPset`: every element is valid and composition is set union. -/
 @[rocq_alias coPsetO, rocq_alias coPsetR, rocq_alias coPsetUR]
 abbrev CoPsetL := LeibnizSet CoPset
 
@@ -406,10 +429,10 @@ abbrev CoPsetL := LeibnizSet CoPset
 #rocq_ignore coPset_op_instance "Provided by the `CMRA (LeibnizSet S)` instance."
 #rocq_ignore coPset_pcore_instance "Provided by the `CMRA (LeibnizSet S)` instance."
 #rocq_ignore coPset_ra_mixin "Provided by the `CMRA (LeibnizSet S)` instance."
-#rocq_ignore coPset_cmra_discrete "Provided by the generic `CMRA.Discrete (LeibnizSet S)` instance."
+#rocq_ignore coPset_cmra_discrete "Provided by the generic `ORA.Discrete (LeibnizSet S)` instance."
 #rocq_ignore coPset_ucmra_mixin "Provided by the `UCMRA (LeibnizSet S)` instance."
 
-/-- The disjoint union CMRA over `CoPset`: composition of two sets is valid only when they are
+/-- The disjoint union ORA over `CoPset`: composition of two sets is valid only when they are
 disjoint, tracked through the `DisjointLeibnizSet` error element. -/
 @[rocq_alias coPset_disj, rocq_alias coPset_disjO, rocq_alias coPset_disjR, rocq_alias coPset_disjUR]
 abbrev CoPsetDisjL := DisjointLeibnizSet CoPset
@@ -419,13 +442,13 @@ abbrev CoPsetDisjL := DisjointLeibnizSet CoPset
 #rocq_ignore coPset_disj_op_instance "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
 #rocq_ignore coPset_disj_pcore_instance "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
 #rocq_ignore coPset_disj_ra_mixin "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
-#rocq_ignore coPset_disj_cmra_discrete "Provided by `CMRA.Discrete (DisjointLeibnizSet S)`."
+#rocq_ignore coPset_disj_cmra_discrete "Provided by `ORA.Discrete (DisjointLeibnizSet S)`."
 #rocq_ignore coPset_disj_ucmra_mixin "Provided by the `UCMRA (DisjointLeibnizSet S)` instance."
 
 /-! ## The Gset CMRAs
 
 The `LeibnizSet`/`DisjointLeibnizSet` construction over an arbitrary `LawfulSet` also subsumes the
-`gset` resource algebras: the OFE, RA, and UCMRA structures are aliased onto the generic types
+`gset` resource algebras: the OFE, RA, and UORA structures are aliased onto the generic types
 below, and the `gset` typeclass instances / mixins are provided by the generic instances. -/
 
 #rocq_ignore gsetO "Use `[LawfulSet S A] → LeibnizSet S` and its `COFE` instance."
@@ -436,7 +459,7 @@ below, and the `gset` typeclass instances / mixins are provided by the generic i
 #rocq_ignore gset_op_instance "Provided by the `CMRA (LeibnizSet S)` instance."
 #rocq_ignore gset_pcore_instance "Provided by the `CMRA (LeibnizSet S)` instance."
 #rocq_ignore gset_ra_mixin "Provided by the `CMRA (LeibnizSet S)` instance."
-#rocq_ignore gset_cmra_discrete "Provided by the generic `CMRA.Discrete (LeibnizSet S)` instance."
+#rocq_ignore gset_cmra_discrete "Provided by the generic `ORA.Discrete (LeibnizSet S)` instance."
 #rocq_ignore gset_ucmra_mixin "Provided by the `UCMRA (LeibnizSet S)` instance."
 
 #rocq_ignore gset_disj "Use `[LawfulSet S A] → DisjointLeibnizSet S`."
@@ -448,5 +471,5 @@ below, and the `gset` typeclass instances / mixins are provided by the generic i
 #rocq_ignore gset_disj_op_instance "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
 #rocq_ignore gset_disj_pcore_instance "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
 #rocq_ignore gset_disj_ra_mixin "Provided by the `CMRA (DisjointLeibnizSet S)` instance."
-#rocq_ignore gset_disj_cmra_discrete "Provided by `CMRA.Discrete (DisjointLeibnizSet S)`."
+#rocq_ignore gset_disj_cmra_discrete "Provided by `ORA.Discrete (DisjointLeibnizSet S)`."
 #rocq_ignore gset_disj_ucmra_mixin "Provided by the `UCMRA (DisjointLeibnizSet S)` instance."

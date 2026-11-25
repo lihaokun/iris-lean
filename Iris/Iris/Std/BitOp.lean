@@ -1,8 +1,11 @@
+/-
+Copyright (c) The Iris-Lean Contributors
+Released under Apache 2.0 license as described in the file LICENSE.
+-/
 module
 
-public import Batteries.Data.Int
-public import Batteries.Data.Nat.Bitwise
 import all Init.Data.Nat.Bitwise.Basic
+public import Iris.Init
 
 @[expose] public section
 
@@ -44,41 +47,6 @@ theorem shiftLeft'_false : ∀ n, shiftLeft' false m n = m <<< n
 
 /-- NB. Copied from Mathlib -/
 @[simp] theorem shiftRight_eq (m n : Nat) : Nat.shiftRight m n = m >>> n := rfl
-
-end Nat
-
-namespace Nat
-
--- Helper lemmas for commutativity of Nat bitwise operations
-theorem or_comm (a b : Nat) : a ||| b = b ||| a := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_or]
-  cases a.testBit i <;> cases b.testBit i <;> rfl
-
-theorem and_comm (a b : Nat) : a &&& b = b &&& a := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_and]
-  cases a.testBit i <;> cases b.testBit i <;> rfl
-
-theorem xor_comm (a b : Nat) : a ^^^ b = b ^^^ a := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_xor]
-  cases a.testBit i <;> cases b.testBit i <;> rfl
-
-theorem or_assoc (a b c : Nat) : (a ||| b) ||| c = a ||| (b ||| c) := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_or]
-  cases a.testBit i <;> cases b.testBit i <;> cases c.testBit i <;> rfl
-
-theorem and_assoc (a b c : Nat) : (a &&& b) &&& c = a &&& (b &&& c) := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_and]
-  cases a.testBit i <;> cases b.testBit i <;> cases c.testBit i <;> rfl
-
-theorem xor_assoc (a b c : Nat) : (a ^^^ b) ^^^ c = a ^^^ (b ^^^ c) := by
-  apply Nat.eq_of_testBit_eq; intro i
-  simp only [Nat.testBit_xor]
-  cases a.testBit i <;> cases b.testBit i <;> cases c.testBit i <;> rfl
 
 theorem testBit_ldiff (a b i : Nat) :
   (ldiff a b).testBit i = (a.testBit i && !(b.testBit i)) := by
@@ -126,7 +94,7 @@ end Nat
 
 namespace Int
 
-open Nat _root_.Int
+open FromMathlib.Nat _root_.Int
 
 /-- NB. Copied from Mathlib
 `lor` takes two integers and returns their bitwise `or` -/
@@ -179,79 +147,79 @@ instance : ShiftRight Int where
 theorem lor_comm (m n : Int) : m ||| n = n ||| m := by
   match m, n with
   | (a : Nat), (b : Nat) =>
-    show (lor a b) = (lor b a)
+    change (lor a b) = (lor b a)
     simp only [lor, Nat.or_comm]
   | (a : Nat), -[b+1] => rfl
   | -[a+1], (b : Nat) => rfl
   | -[a+1], -[b+1] =>
-    show (lor (-[a+1]) (-[b+1])) = (lor (-[b+1]) (-[a+1]))
+    change (lor (-[a+1]) (-[b+1])) = (lor (-[b+1]) (-[a+1]))
     simp only [lor, Nat.and_comm]
 
 @[simp]
 theorem land_comm (m n : Int) : m &&& n = n &&& m := by
   match m, n with
   | (a : Nat), (b : Nat) =>
-    show (land a b) = (land b a)
+    change (land a b) = (land b a)
     simp only [land, Nat.and_comm]
   | (a : Nat), -[b+1] => rfl
   | -[a+1], (b : Nat) => rfl
   | -[a+1], -[b+1] =>
-    show (land (-[a+1]) (-[b+1])) = (land (-[b+1]) (-[a+1]))
+    change (land (-[a+1]) (-[b+1])) = (land (-[b+1]) (-[a+1]))
     simp only [land, Nat.or_comm]
 
 @[simp]
 theorem xor_comm (m n : Int) : m ^^^ n = n ^^^ m := by
   match m, n with
   | (a : Nat), (b : Nat) =>
-    show (xor a b) = (xor b a)
+    change (xor a b) = (xor b a)
     simp only [xor, Nat.xor_comm]
   | (a : Nat), -[b+1] =>
-    show (xor a (-[b+1])) = (xor (-[b+1]) a)
+    change (xor a (-[b+1])) = (xor (-[b+1]) a)
     simp only [xor, Nat.xor_comm]
   | -[a+1], (b : Nat) =>
-    show (xor (-[a+1]) b) = (xor b (-[a+1]))
+    change (xor (-[a+1]) b) = (xor b (-[a+1]))
     simp only [xor, Nat.xor_comm]
   | -[a+1], -[b+1] =>
-    show (xor (-[a+1]) (-[b+1])) = (xor (-[b+1]) (-[a+1]))
+    change (xor (-[a+1]) (-[b+1])) = (xor (-[b+1]) (-[a+1]))
     simp only [xor, Nat.xor_comm]
 
 theorem lor_assoc (m n k : Int) : (m ||| n) ||| k = m ||| (n ||| k) := by
   match m, n, k with
   | (a : Nat), (b : Nat), (c : Nat) =>
-    show lor (lor a b) c = lor a (lor b c)
+    change lor (lor a b) c = lor a (lor b c)
     simp only [lor, Nat.or_assoc]
   | (a : Nat), (b : Nat), -[c+1] =>
-    show lor (lor a b) (-[c+1]) = lor a (lor b (-[c+1]))
+    change lor (lor a b) (-[c+1]) = lor a (lor b (-[c+1]))
     simp only [lor]
     congr 1
     rw [← ldiff_ldiff_or, ldiff_comm_and]
   | (a : Nat), -[b+1], (c : Nat) =>
-    show lor (lor a (-[b+1])) c = lor a (lor (-[b+1]) c)
+    change lor (lor a (-[b+1])) c = lor a (lor (-[b+1]) c)
     simp only [lor]
     congr 1
     exact ldiff_comm_and b a c
   | (a : Nat), -[b+1], -[c+1] =>
-    show lor (lor a (-[b+1])) (-[c+1]) = lor a (lor (-[b+1]) (-[c+1]))
+    change lor (lor a (-[b+1])) (-[c+1]) = lor a (lor (-[b+1]) (-[c+1]))
     simp only [lor]
     congr 1
     exact ldiff_and_self a b c
   | -[a+1], (b : Nat), (c : Nat) =>
-    show lor (lor (-[a+1]) b) c = lor (-[a+1]) (lor b c)
+    change lor (lor (-[a+1]) b) c = lor (-[a+1]) (lor b c)
     simp only [lor]
     congr 1
     exact ldiff_ldiff_or a b c
   | -[a+1], (b : Nat), -[c+1] =>
-    show lor (lor (-[a+1]) b) (-[c+1]) = lor (-[a+1]) (lor b (-[c+1]))
+    change lor (lor (-[a+1]) b) (-[c+1]) = lor (-[a+1]) (lor b (-[c+1]))
     simp only [lor]
     congr 1
     exact and_ldiff_right a b c
   | -[a+1], -[b+1], (c : Nat) =>
-    show lor (lor (-[a+1]) (-[b+1])) c = lor (-[a+1]) (lor (-[b+1]) c)
+    change lor (lor (-[a+1]) (-[b+1])) c = lor (-[a+1]) (lor (-[b+1]) c)
     simp only [lor]
     congr 1
     exact and_ldiff_left a b c
   | -[a+1], -[b+1], -[c+1] =>
-    show lor (lor (-[a+1]) (-[b+1])) (-[c+1]) = lor (-[a+1]) (lor (-[b+1]) (-[c+1]))
+    change lor (lor (-[a+1]) (-[b+1])) (-[c+1]) = lor (-[a+1]) (lor (-[b+1]) (-[c+1]))
     simp only [lor]
     congr 1
     exact Nat.and_assoc a b c
@@ -259,71 +227,71 @@ theorem lor_assoc (m n k : Int) : (m ||| n) ||| k = m ||| (n ||| k) := by
 theorem land_assoc (m n k : Int) : (m &&& n) &&& k = m &&& (n &&& k) := by
   match m, n, k with
   | (a : Nat), (b : Nat), (c : Nat) =>
-    show land (land a b) c = land a (land b c)
+    change land (land a b) c = land a (land b c)
     simp only [land, Nat.and_assoc]
   | (a : Nat), (b : Nat), -[c+1] =>
-    show land (land a b) (-[c+1]) = land a (land b (-[c+1]))
+    change land (land a b) (-[c+1]) = land a (land b (-[c+1]))
     simp only [land]
     exact congrArg Nat.cast (and_ldiff_left a b c)
   | (a : Nat), -[b+1], (c : Nat) =>
-    show land (land a (-[b+1])) c = land a (land (-[b+1]) c)
+    change land (land a (-[b+1])) c = land a (land (-[b+1]) c)
     simp only [land]
     exact congrArg Nat.cast (and_ldiff_right a b c)
   | (a : Nat), -[b+1], -[c+1] =>
-    show land (land a (-[b+1])) (-[c+1]) = land a (land (-[b+1]) (-[c+1]))
+    change land (land a (-[b+1])) (-[c+1]) = land a (land (-[b+1]) (-[c+1]))
     simp only [land]
     rw [ldiff_comm_and, ldiff_ldiff_or, Nat.or_comm]
   | -[a+1], (b : Nat), (c : Nat) =>
-    show land (land (-[a+1]) b) c = land (-[a+1]) (land b c)
+    change land (land (-[a+1]) b) c = land (-[a+1]) (land b c)
     simp only [land]
     exact congrArg Nat.cast (ldiff_and_self a b c)
   | -[a+1], (b : Nat), -[c+1] =>
-    show land (land (-[a+1]) b) (-[c+1]) = land (-[a+1]) (land b (-[c+1]))
+    change land (land (-[a+1]) b) (-[c+1]) = land (-[a+1]) (land b (-[c+1]))
     simp only [land]
     rw [ldiff_comm_and]
   | -[a+1], -[b+1], (c : Nat) =>
-    show land (land (-[a+1]) (-[b+1])) c = land (-[a+1]) (land (-[b+1]) c)
+    change land (land (-[a+1]) (-[b+1])) c = land (-[a+1]) (land (-[b+1]) c)
     simp only [land]
     rw [ldiff_ldiff_or, Nat.or_comm]
   | -[a+1], -[b+1], -[c+1] =>
-    show land (land (-[a+1]) (-[b+1])) (-[c+1]) = land (-[a+1]) (land (-[b+1]) (-[c+1]))
+    change land (land (-[a+1]) (-[b+1])) (-[c+1]) = land (-[a+1]) (land (-[b+1]) (-[c+1]))
     simp only [land, Nat.or_assoc]
 
 theorem xor_assoc (m n k : Int) : (m ^^^ n) ^^^ k = m ^^^ (n ^^^ k) := by
   match m, n, k with
   | (a : Nat), (b : Nat), (c : Nat) =>
-    show xor (xor a b) c = xor a (xor b c)
+    change xor (xor a b) c = xor a (xor b c)
     simp only [xor, Nat.xor_assoc]
   | (a : Nat), (b : Nat), -[c+1] =>
-    show xor (xor a b) (-[c+1]) = xor a (xor b (-[c+1]))
+    change xor (xor a b) (-[c+1]) = xor a (xor b (-[c+1]))
     simp only [xor, Nat.xor_assoc]
   | (a : Nat), -[b+1], (c : Nat) =>
-    show xor (xor a (-[b+1])) c = xor a (xor (-[b+1]) c)
+    change xor (xor a (-[b+1])) c = xor a (xor (-[b+1]) c)
     simp only [xor, Nat.xor_assoc]
   | (a : Nat), -[b+1], -[c+1] =>
-    show xor (xor a (-[b+1])) (-[c+1]) = xor a (xor (-[b+1]) (-[c+1]))
+    change xor (xor a (-[b+1])) (-[c+1]) = xor a (xor (-[b+1]) (-[c+1]))
     simp only [xor, Nat.xor_assoc]
   | -[a+1], (b : Nat), (c : Nat) =>
-    show xor (xor (-[a+1]) b) c = xor (-[a+1]) (xor b c)
+    change xor (xor (-[a+1]) b) c = xor (-[a+1]) (xor b c)
     simp only [xor, Nat.xor_assoc]
   | -[a+1], (b : Nat), -[c+1] =>
-    show xor (xor (-[a+1]) b) (-[c+1]) = xor (-[a+1]) (xor b (-[c+1]))
+    change xor (xor (-[a+1]) b) (-[c+1]) = xor (-[a+1]) (xor b (-[c+1]))
     simp only [xor, Nat.xor_assoc]
   | -[a+1], -[b+1], (c : Nat) =>
-    show xor (xor (-[a+1]) (-[b+1])) c = xor (-[a+1]) (xor (-[b+1]) c)
+    change xor (xor (-[a+1]) (-[b+1])) c = xor (-[a+1]) (xor (-[b+1]) c)
     simp only [xor, Nat.xor_assoc]
   | -[a+1], -[b+1], -[c+1] =>
-    show xor (xor (-[a+1]) (-[b+1])) (-[c+1]) = xor (-[a+1]) (xor (-[b+1]) (-[c+1]))
+    change xor (xor (-[a+1]) (-[b+1])) (-[c+1]) = xor (-[a+1]) (xor (-[b+1]) (-[c+1]))
     simp only [xor, Nat.xor_assoc]
 
 @[simp]
 theorem lor_zero (m : Int) : m ||| 0 = m := by
   match m with
   | (a : Nat) =>
-    show lor a 0 = a
+    change lor a 0 = a
     simp only [lor, Nat.or_zero]
   | -[a+1] =>
-    show lor (-[a+1]) 0 = -[a+1]
+    change lor (-[a+1]) 0 = -[a+1]
     simp only [lor, Nat.ldiff_zero]
 
 @[simp]
@@ -334,11 +302,11 @@ theorem zero_lor (m : Int) : 0 ||| m = m := by
 theorem land_neg_one (m : Int) : m &&& (-1) = m := by
   match m with
   | (a : Nat) =>
-    show land a (-[0+1]) = a
+    change land a (-[0+1]) = a
     simp only [land]
     rw [Nat.ldiff_zero]
   | -[a+1] =>
-    show land (-[a+1]) (-[0+1]) = -[a+1]
+    change land (-[a+1]) (-[0+1]) = -[a+1]
     simp only [land]
     simp [Nat.or_zero]
 
@@ -350,10 +318,10 @@ theorem neg_one_land (m : Int) : (-1) &&& m = m := by
 theorem xor_zero (m : Int) : m ^^^ 0 = m := by
   match m with
   | (a : Nat) =>
-    show xor a 0 = a
+    change xor a 0 = a
     simp only [xor, Nat.xor_zero]
   | -[a+1] =>
-    show xor (-[a+1]) 0 = -[a+1]
+    change xor (-[a+1]) 0 = -[a+1]
     simp only [xor, Nat.xor_zero]
 
 @[simp]
@@ -364,20 +332,20 @@ theorem zero_xor (m : Int) : 0 ^^^ m = m := by
 theorem xor_self (m : Int) : m ^^^ m = 0 := by
   match m with
   | (a : Nat) =>
-    show xor a a = 0
+    change xor a a = 0
     simp only [xor, Nat.xor_self]; rfl
   | -[a+1] =>
-    show xor (-[a+1]) (-[a+1]) = 0
+    change xor (-[a+1]) (-[a+1]) = 0
     simp only [xor, Nat.xor_self]; rfl
 
 @[simp]
 theorem land_zero (m : Int) : m &&& 0 = 0 := by
   match m with
   | (a : Nat) =>
-    show land a 0 = 0
+    change land a 0 = 0
     simp only [land, Nat.and_zero]; rfl
   | -[a+1] =>
-    show land (-[a+1]) 0 = 0
+    change land (-[a+1]) 0 = 0
     simp [land, ldiff, Nat.bitwise]
 
 @[simp]
@@ -388,11 +356,11 @@ theorem zero_land (m : Int) : 0 &&& m = 0 := by
 theorem lor_neg_one (m : Int) : m ||| (-1) = -1 := by
   match m with
   | (a : Nat) =>
-    show lor a (-[0+1]) = -1
+    change lor a (-[0+1]) = -1
     simp only [lor]
     simp [ldiff, Nat.bitwise]
   | -[a+1] =>
-    show lor (-[a+1]) (-[0+1]) = -1
+    change lor (-[a+1]) (-[0+1]) = -1
     simp [lor, Nat.and_zero]
 
 @[simp]
@@ -414,7 +382,7 @@ theorem shiftRight_neg (m : Int) (n : Int) : m >>> (-n) = m <<< n := by
   simp [HShiftRight.hShiftRight, ShiftRight.shiftRight]
 
 theorem shiftLeft_natCast (m n : Nat) : (m : Int) <<< (n : Int) = ((m <<< n) : Nat) := by
-  show Nat.shiftLeft' false m n = ((m <<< n : Nat) : Int)
+  change Nat.shiftLeft' false m n = ((m <<< n : Nat) : Int)
   rw [Nat.shiftLeft'_false]
 
 theorem natCast_lor (m n : Nat) : ((m ||| n : Nat) : Int) = (m : Int) ||| (n : Int) := rfl

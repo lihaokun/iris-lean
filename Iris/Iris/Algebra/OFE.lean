@@ -1,28 +1,40 @@
 /-
-Copyright (c) 2023 Mario Carneiro. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Mario Carneiro, Sebastian Graf
+Authors: Mario Carneiro, Sebastian Graf, Sergei Stepanenko, Markus de Medeiros
 -/
 module
 
-public meta import Iris.Std.RocqPorting
+public import Iris.Std.Nat
+public import Iris.Algebra.StepIndex
+public import Iris.Std.Option
 
 @[expose] public section
 
 namespace Iris
 
+/-- An indexed family of distances, on a type -/
+@[indexed SI, rocq_alias Dist]
+class HasDist {SI : Type _} (α : Type _) where
+  dist : SI → α → α → Prop
+
+abbrev HasDistᵢ (SI : Type _) (α : Type _) := HasDist (SI := SI) α
+
 /-- Ordered family of equivalences -/
-@[rocq_alias ofe]
-class OFE (α : Type _) where
-  Equiv : α → α → Prop
-  Dist : Nat → α → α → Prop
-  dist_eqv : Equivalence (Dist n)
-  equiv_dist : Equiv x y ↔ ∀ n, Dist n x y
-  dist_lt : Dist n x y → m < n → Dist m x y
+@[indexed SI, rocq_alias ofe]
+class OFE {SI : Type _} [SIdx SI] (α : Type _) extends HasDistᵢ SI α where
+  dist_eqv : Equivalence (dist n)
+  eq_dist' : x = y ↔ ∀ n, dist n x y
+  dist_lt : dist n x y → m < n → dist m x y
+
+abbrev OFEᵢ (SI : Type _) [SIdx SI] (α : Type _) := OFE (SI := SI) α
+
+abbrev OFE.Dist {SI : Type _} {α : Type _} [HasDistᵢ SI α] :
+    SI → α → α → Prop :=
+  HasDist.dist
 
 #rocq_ignore OfeMixin "Use the OFE type class"
 #rocq_ignore ofe_mixin_of' "Not needed"
-#rocq_ignore Dist "Use OFE.Dist"
 
 #rocq_ignore dist_ne "Rewrite using Equiv.trans"
 #rocq_ignore dist_proper "Rewrite using Equiv.trans"
@@ -30,8 +42,13 @@ class OFE (α : Type _) where
 
 open OFE
 
-scoped infix:40 " ≡ " => OFE.Equiv
 scoped notation:40 x " ≡{" n "}≡ " y:41 => OFE.Dist n x y
+
+variable {SI : Type _} [SIdx SI]
+local stepindex SI
+
+@[rocq_alias equiv_dist]
+theorem OFE.eq_dist [OFE α] {x y : α} : x = y ↔ ∀ n, x ≡{n}≡ y := OFE.eq_dist'
 
 namespace OFE
 
@@ -41,39 +58,31 @@ theorem dist_equivalence [OFE α] {n} : Equivalence (Dist (α := α) n) := dist_
 @[rocq_alias dist_lt]
 theorem Dist.lt [OFE α] {m n} {x y : α} : x ≡{n}≡ y → m < n → x ≡{m}≡ y := dist_lt
 
-@[rocq_alias dist_le]
+@[rocq_alias ofe.dist_le]
 theorem Dist.le [OFE α] {m n} {x y : α} (h : x ≡{n}≡ y) (h' : m ≤ n) : x ≡{m}≡ y :=
-  if hm : m = n then hm ▸ h else h.lt (Nat.lt_of_le_of_ne h' hm)
+  if hm : m = n then hm ▸ h else h.lt (SIdx.le_neq.mpr ⟨h', hm⟩)
 #rocq_ignore dist_le' "Use Dist.le"
-#rocq_ignore dist_S "Subsumed by `Dist.lt`/`Dist.le`."
+#rocq_ignore ofe.dist_S "Subsumed by `Dist.lt`/`Dist.le`."
 
 @[simp, refl] theorem Dist.rfl [OFE α] {n} {x : α} : x ≡{n}≡ x := dist_eqv.1 _
+@[simp, refl] theorem Dist.refl [OFE α] {n} (x : α) : x ≡{n}≡ x := dist_eqv.1 _
 @[symm] theorem Dist.symm [OFE α] {n} {x : α} : x ≡{n}≡ y → y ≡{n}≡ x := dist_eqv.2
 theorem Dist.trans [OFE α] {n} {x : α} : x ≡{n}≡ y → y ≡{n}≡ z → x ≡{n}≡ z := dist_eqv.3
 theorem Dist.of_eq [OFE α] {x y : α} : x = y → x ≡{n}≡ y := (· ▸ .rfl)
 
-@[rocq_alias ofe_equivalence]
-theorem equiv_eqv [ofe : OFE α] : Equivalence ofe.Equiv := by
-  constructor
-  · rintro x; rw [ofe.equiv_dist]; rintro n; exact Dist.rfl
-  · rintro x y; simp [ofe.equiv_dist]; rintro h n; exact Dist.symm (h n)
-  · rintro x y z; simp [ofe.equiv_dist]; rintro h₁ h₂ n; exact Dist.trans (h₁ n) (h₂ n)
+#rocq_ignore ofe_equivalence "OFE is Leibniz; use equality"
+theorem _root_.Eq.dist [OFE α] {x y : α} (h : x = y) : x ≡{n}≡ y := h ▸ .rfl
 
-@[simp, refl] theorem Equiv.rfl [OFE α] {x : α} : x ≡ x := equiv_eqv.1 _
-@[symm] theorem Equiv.symm [OFE α] {x : α} : x ≡ y → y ≡ x := equiv_eqv.2
-theorem Equiv.trans [OFE α] {x : α} : x ≡ y → y ≡ z → x ≡ z := equiv_eqv.3
-theorem Equiv.dist [OFE α] {x : α} : x ≡ y → x ≡{n}≡ y := (equiv_dist.1 · _)
-theorem Equiv.of_eq [OFE α] {x y : α} : x = y → x ≡ y := (· ▸ .rfl)
-
-instance [OFE α] : Trans OFE.Equiv OFE.Equiv (OFE.Equiv : α → α → Prop) where
-  trans := Equiv.trans
-
-instance [OFE α] {n : Nat} : Trans (OFE.Dist n) (OFE.Dist n) (OFE.Dist n : α → α → Prop) where
+instance [OFE α] {n} : Trans (OFE.Dist n) (OFE.Dist n) (OFE.Dist n : α → α → Prop) where
   trans := Dist.trans
 
 /-- A function `f : α → β` is non-expansive if it preserves `n`-equivalence. -/
+@[indexed SI]
 class NonExpansive [OFE α] [OFE β] (f : α → β) where
   ne : ∀ ⦃n x₁ x₂⦄, x₁ ≡{n}≡ x₂ → f x₁ ≡{n}≡ f x₂
+
+variable (SI) in
+abbrev NonExpansiveᵢ [OFE α] [OFE β] (f : α → β) := NonExpansive f
 
 instance id_ne [OFE α] : NonExpansive (@id α) := ⟨fun _ _ _ h => h⟩
 
@@ -84,20 +93,17 @@ theorem NonExpansive.comp [OFE α] [OFE β] [OFE γ] {g : β → γ} {f : α →
     (hg : NonExpansive g) (hf : NonExpansive f) : NonExpansive (g ∘ f) :=
   ⟨fun {_ _ _} h => hg.ne (hf.ne h)⟩
 
-/-- A non-expansive function preserves equivalence. -/
-@[rocq_alias ne_proper]
-theorem NonExpansive.eqv [OFE α] [OFE β] {f : α → β} [NonExpansive f]
-    ⦃x₁ x₂⦄ (h : x₁ ≡ x₂) : f x₁ ≡ f x₂ :=
-  equiv_dist.2 fun _ => ne (equiv_dist.1 h _)
+#rocq_ignore ne_proper "OFE is Leibniz; use equality"
 
 /-- A function `f : α → β → γ` is non-expansive if it preserves `n`-equivalence in each argument. -/
+@[indexed SI]
 class NonExpansive₂ [OFE α] [OFE β] [OFE γ] (f : α → β → γ) where
   ne : ∀ ⦃n x₁ x₂⦄, x₁ ≡{n}≡ x₂ → ∀ ⦃y₁ y₂⦄, y₁ ≡{n}≡ y₂ → f x₁ y₁ ≡{n}≡ f x₂ y₂
 
-@[rocq_alias ne_proper_2]
-theorem NonExpansive₂.eqv [OFE α] [OFE β] [OFE γ] {f : α → β → γ} [NonExpansive₂ f]
-    ⦃x₁ x₂⦄ (hx : x₁ ≡ x₂) ⦃y₁ y₂⦄ (hy : y₁ ≡ y₂) : f x₁ y₁ ≡ f x₂ y₂ :=
-  equiv_dist.2 fun _ => ne hx.dist hy.dist
+variable (SI) in
+abbrev NonExpansive₂ᵢ [OFE α] [OFE β] [OFE γ] (f : α → β → γ) := NonExpansive₂ f
+
+#rocq_ignore ne_proper_2 "OFE is Leibniz; use equality"
 
 /-- Note: Not an instance, for symmetry with NonExpansive₂.ne_left, which cannot be an instance. -/
 theorem NonExpansive₂.ne_right [OFE α] [OFE β] [OFE γ] (f : α → β → γ) [NonExpansive₂ f]
@@ -109,11 +115,34 @@ theorem NonExpansive₂.ne_left [OFE α] [OFE β] [OFE γ] (f : α → β → γ
     (b : β) : NonExpansive (f · b) :=
   ⟨fun {_ _ _} h => ne h Dist.rfl⟩
 
+/-- A function `f : α → β → γ → δ` is non-expansive if it preserves `n`-equivalence in each
+argument. -/
+@[indexed SI]
+class NonExpansive₃ [OFE α] [OFE β] [OFE γ] [OFE δ] (f : α → β → γ → δ) where
+  ne : ∀ ⦃n x₁ x₂⦄, x₁ ≡{n}≡ x₂ → ∀ ⦃y₁ y₂⦄, y₁ ≡{n}≡ y₂ → ∀ ⦃z₁ z₂⦄, z₁ ≡{n}≡ z₂ →
+    f x₁ y₁ z₁ ≡{n}≡ f x₂ y₂ z₂
+
+variable (SI) in
+abbrev NonExpansive₃ᵢ [OFE α] [OFE β] [OFE γ] [OFE δ] (f : α → β → γ → δ) :=
+    NonExpansive₃ f
+
+/-- A function `f : α → β → γ → δ → ε` is non-expansive if it preserves `n`-equivalence in each
+argument. -/
+@[indexed SI]
+class NonExpansive₄ [OFE α] [OFE β] [OFE γ] [OFE δ] [OFE ε] (f : α → β → γ → δ → ε) where
+  ne : ∀ ⦃n x₁ x₂⦄, x₁ ≡{n}≡ x₂ → ∀ ⦃y₁ y₂⦄, y₁ ≡{n}≡ y₂ → ∀ ⦃z₁ z₂⦄, z₁ ≡{n}≡ z₂ →
+    ∀ ⦃w₁ w₂⦄, w₁ ≡{n}≡ w₂ → f x₁ y₁ z₁ w₁ ≡{n}≡ f x₂ y₂ z₂ w₂
+
+variable (SI) in
+abbrev NonExpansive₄ᵢ [OFE α] [OFE β] [OFE γ] [OFE δ] [OFE ε] (f : α → β → γ → δ → ε) :=
+    NonExpansive₄ f
+
 /-- `DistLater n x y` means that `x` and `y` are `m`-equivalent for all `m < n`. -/
 @[rocq_alias dist_later]
-def DistLater [OFE α] (n : Nat) (x y : α) : Prop := ∀ m, m < n → x ≡{m}≡ y
+def DistLater [OFE α] (n : SI) (x y : α) : Prop := ∀ m, m < n → x ≡{m}≡ y
 
 @[simp, refl] theorem DistLater.rfl [OFE α] {n} {x : α} : DistLater n x x := fun _ _ => .rfl
+@[simp, refl] theorem DistLater.refl [OFE α] {n} (x : α) : DistLater n x x := fun _ _ => .rfl
 @[symm] theorem DistLater.symm [OFE α] {n} {x : α} (h : DistLater n x y) : DistLater n y x :=
   fun _ hm => (h _ hm).symm
 theorem DistLater.trans [OFE α] {n} {x : α} (h1 : DistLater n x y) (h2 : DistLater n y z) :
@@ -122,7 +151,7 @@ theorem DistLater.trans [OFE α] {n} {x : α} (h1 : DistLater n x y) (h2 : DistL
 /-- `DistLater n`-equivalence is an equivalence relation. -/
 @[rocq_alias dist_later_equivalence]
 theorem distLater_eqv [OFE α] {n} : Equivalence (α := α) (DistLater n) where
-  refl _ := DistLater.rfl
+  refl := DistLater.refl
   symm h := h.symm
   trans h1 := h1.trans
 
@@ -137,31 +166,33 @@ theorem DistLater.dist_lt [OFE α] {m n} {x y : α} (h : DistLater n x y) (hm : 
   h _ hm
 
 /-- `DistLater 0`-equivalence is trivial. -/
-@[simp, rocq_alias dist_later_0] theorem distLater_zero [OFE α] {x y : α} : DistLater 0 x y := nofun
+@[simp, rocq_alias dist_later_0] theorem distLater_zero [OFE α] {x y : α} : DistLater 0 x y :=
+  fun m hm => absurd hm (SIdx.not_lt_zero m)
 
 /-- `DistLater n`-equivalence is equivalent to `(n + 1)`-equivalence. -/
-@[rocq_alias dist_later_S]
-theorem distLater_succ [OFE α] {n} {x y : α} : DistLater n.succ x y ↔ x ≡{n}≡ y :=
-  ⟨(·.dist_lt (Nat.lt_succ_self _)), fun h1 _ h2 => h1.le (Nat.le_of_lt_succ h2)⟩
+@[rocq_alias ofe.dist_later_S]
+theorem distLater_succ [OFE α] {n} {x y : α} : DistLater (SIdx.succ n) x y ↔ x ≡{n}≡ y :=
+  ⟨(·.dist_lt (SIdx.lt_succ_self _)), fun h1 _ h2 => h1.le (SIdx.lt_succ_r.mp h2)⟩
 
-theorem distLater_soundness [OFE α] {x y : α} (H : ∀ n, DistLater n x y → x ≡{n}≡ y) : x ≡ y := by
-  refine equiv_dist.mpr fun n => ?_
-  induction n with
-  | zero => exact H 0 distLater_zero
-  | succ n IH => exact H (n + 1) (distLater_succ.mpr IH)
+theorem distLater_soundness [OFE α] {x y : α} (H : ∀ n, DistLater n x y → x ≡{n}≡ y) : x = y :=
+  eq_dist.mpr (SIdx.lt_wf.induction · H)
 
 /-- A function `f : α → β` is contractive if it sends `DistLater n`-equivalent inputs to
 `n`-equivalent outputs. -/
+@[indexed SI]
 class Contractive [OFE α] [OFE β] (f : α → β) where
   distLater_dist : DistLater n x y → f x ≡{n}≡ f y
+
+variable (SI) in
+abbrev Contractiveᵢ [OFE α] [OFE β] (f : α → β) := Contractive f
 
 @[simp, rocq_alias contractive_0] theorem Contractive.zero [OFE α] [OFE β] (f : α → β)
     [Contractive f] {x y} : f x ≡{0}≡ f y :=
   Contractive.distLater_dist distLater_zero
 
-@[rocq_alias contractive_S]
-theorem Contractive.succ [OFE α] [OFE β] (f : α → β) [Contractive f] {n x y}
-    (h : x ≡{n}≡ y) : f x ≡{n.succ}≡ f y :=
+@[rocq_alias ofe.contractive_S]
+theorem Contractive.succ [OFE α] [OFE β] (f : α → β) [Contractive f] {n} {x y}
+    (h : x ≡{n}≡ y) : f x ≡{SIdx.succ n}≡ f y :=
   Contractive.distLater_dist (distLater_succ.2 h)
 
 /-- A contractive function is non-expansive. -/
@@ -169,174 +200,174 @@ theorem Contractive.succ [OFE α] [OFE β] (f : α → β) [Contractive f] {n x 
 instance ne_of_contractive [OFE α] [OFE β] (f : α → β) [Contractive f] : NonExpansive f where
   ne := fun _ _ _ h => Contractive.distLater_dist (Dist.distLater h)
 
-/-- A contractive function preserves equivalence. -/
-@[rocq_alias contractive_proper]
-theorem Contractive.eqv [OFE α] [OFE β] (f : α → β) [Contractive f] ⦃x y : α⦄ (h : x ≡ y) :
-    f x ≡ f y := NonExpansive.eqv h
+#rocq_ignore contractive_proper "OFE is Leibniz; use equality"
+
+@[rocq_alias contractive_dist_later_dist]
+theorem Contractive.dist_later_dist [OFE α] [OFE β] (f : α → β) [Contractive f] {n x y}
+    (h : DistLater n x y) : f x ≡{n}≡ f y := Contractive.distLater_dist h
+
+/-- Pre-composing a non-expansive function preserves `DistLater`. -/
+@[rocq_alias ne_dist_later]
+theorem ne_dist_later [OFE α] [OFE β] (f : α → β) [NonExpansive f] {n x y}
+    (h : DistLater n x y) : DistLater n (f x) (f y) := fun m hm => NonExpansive.ne (h m hm)
+
+@[rocq_alias dist_pointwise_lt]
+theorem dist_pointwise_lt [OFE β] {n m} {f g : α → β} (hlt : m < n)
+    (hp : ∀ a, DistLater n (f a) (g a)) : ∀ a, f a ≡{m}≡ g a := fun a => hp a m hlt
 
 /-- Constant functions are contractive. -/
 @[rocq_alias const_contractive]
 instance [OFE α] [OFE β] {x : β} : Contractive (fun _ : α => x) where
   distLater_dist := fun _ => Dist.rfl
 
-/-- The discrete OFE obtained from an equivalence relation `Equiv` -/
+/-- The discrete OFE obtained from an equality relation `Eq` -/
 @[reducible, rocq_alias discrete_ofe_mixin]
-def ofDiscrete (Equiv : α → α → Prop) (equiv_eqv : Equivalence Equiv) : OFE α where
-  Equiv := Equiv
-  Dist _ := Equiv
-  dist_eqv := equiv_eqv
-  equiv_dist := (forall_const _).symm
+def ofDiscrete (α : Type _) : OFE α where
+  dist _ := Eq
+  dist_eqv := ⟨congrFun rfl, (Eq.symm ·), (· ▸ ·)⟩
+  eq_dist' := (forall_const _).symm
   dist_lt h _ := h
 
 /-- A discrete element in an OFE -/
-@[rocq_alias Discrete]
+@[indexed SI, rocq_alias Discrete]
 class DiscreteE {α : Type _} [OFE α] (x : α) : Prop where
-  discrete : x ≡{0}≡ y → x ≡ y
+  discrete : x ≡{0}≡ y → x = y
 
-/-- A discrete OFE is one where equivalence is implied by `0`-equivalence. -/
-@[rocq_alias OfeDiscrete]
+variable (SI) in
+abbrev DiscreteEᵢ {α : Type _} [OFE α] (x : α) := DiscreteE x
+
+/-- A discrete OFE is one where equality is implied by `0`-equivalence. -/
+@[indexed SI, rocq_alias OfeDiscrete]
 class Discrete (α : Type _) [OFE α] where
-  discrete_0 {x y : α} : x ≡{0}≡ y → x ≡ y
+  discrete_0 {x y : α} : x ≡{0}≡ y → x = y
 export OFE.Discrete (discrete_0)
 
+variable (SI) in
+abbrev Discreteᵢ (α : Type _) [OFE α] := Discrete α
+
 @[rocq_alias Discrete_proper]
-theorem discreteE_eqv [OFE α] {x y : α} (h : x ≡ y): DiscreteE x ↔ DiscreteE y :=
-  ⟨fun ⟨dx⟩ => ⟨fun e => h.symm.trans (dx (h.dist.trans e))⟩,
-   fun ⟨dy⟩ => ⟨fun e => h.trans (dy (h.symm.dist.trans e))⟩⟩
+theorem discreteE_eq [OFE α] {x y : α} (h : x = y) : DiscreteE x ↔ DiscreteE y := h ▸ Iff.rfl
 
 #rocq_ignore ofe_discrete_subrelation "Not needed"
 #rocq_ignore discrete_ofe_discrete "Not needed"
 
-/-- For discrete OFEs, `n`-equivalence implies equivalence for any `n`. -/
+/-- For discrete OFEs, `n`-equivalence implies equality. -/
 @[rocq_alias discrete]
-theorem Discrete.discrete [OFE α] [Discrete α] {n} {x y : α} (h : x ≡{n}≡ y) : x ≡ y :=
-  discrete_0 (h.le (Nat.zero_le _))
+theorem Discrete.discrete [OFE α] [Discrete α] {n} {x y : α} (h : x ≡{n}≡ y) : x = y :=
+  discrete_0 <| h.le SIdx.le_0_l
 export OFE.Discrete (discrete)
+
+/-- Every function out of a discrete OFE is non-expansive. -/
+instance ne_of_discrete [OFE α] [Discrete α] [OFE β] (f : α → β) :
+    NonExpansive f :=
+  ⟨fun _ _ _ Hx => .of_eq (congrArg f <| discrete Hx)⟩
 
 instance Discrete.toDiscreteE [OFE α] [Discrete α] (x : α) : DiscreteE x := ⟨discrete_0⟩
 
-/-- For discrete OFEs, `n`-equivalence implies equivalence for any `n`. -/
+/-- For discrete OFEs, `0`-equivalence implies equivalence for any `n`. -/
 theorem Discrete.discrete_n [OFE α] [Discrete α] {n} {x y : α} (h : x ≡{0}≡ y) : x ≡{n}≡ y :=
   (discrete h).dist
 export OFE.Discrete (discrete_n)
 
 @[rocq_alias discrete_iff]
-theorem Discrete.discrete_iff [OFE α] [Discrete α] (n) {x y : α} : x ≡ y ↔ x ≡{n}≡ y :=
-  ⟨Equiv.dist, discrete⟩
+theorem Discrete.discrete_iff [OFE α] [Discrete α] (n) {x y : α} : x = y ↔ x ≡{n}≡ y :=
+  ⟨Eq.dist, discrete⟩
 
 @[rocq_alias discrete_iff_0]
 theorem Discrete.discrete_iff_0 [OFE α] [Discrete α] (n) {x y : α} : x ≡{0}≡ y ↔ x ≡{n}≡ y :=
-  ⟨discrete_n, fun h => h.le (Nat.zero_le _)⟩
+  ⟨discrete_n, fun h => h.le SIdx.le_0_l⟩
 
-class Leibniz (α : Type _) [OFE α] where
-  eq_of_eqv {x y : α} : x ≡ y → x = y
-export OFE.Leibniz (eq_of_eqv)
-
-theorem Equiv.to_eq {α} [OFE α] [Leibniz α] {x y : α} (h : x ≡ y) : x = y :=
-  eq_of_eqv h
-
-#rocq_ignore boolO "Canonical Leibniz OFE on `bool`; Lean uses `LeibnizO Bool`."
-#rocq_ignore natO "Canonical Leibniz OFE on `nat`; Lean uses `LeibnizO Nat`."
+#rocq_ignore boolO "Canonical Leibniz OFE on `bool`; Lean uses `ofDiscrete Bool`."
+#rocq_ignore natO "Canonical Leibniz OFE on `nat`; Lean uses `ofDiscrete Nat`."
 #rocq_ignore positiveO "Canonical Leibniz OFE on `positive`; not applicable in Lean."
 #rocq_ignore NO "Canonical Leibniz OFE on `N`; not applicable in Lean."
 #rocq_ignore ZO "Canonical Leibniz OFE on `Z`; not applicable in Lean."
-#rocq_ignore PropO "Canonical discrete OFE on `Prop`; Lean uses `LeibnizO Prop`."
+#rocq_ignore PropO "Canonical discrete OFE on `Prop`; Lean uses `ofDiscrete Prop`."
+#rocq_ignore discrete_dist "All equivalences are equalities in Iris-Lean."
+#rocq_ignore Prop_equiv "All equivalences are equalities in Iris-Lean."
+#rocq_ignore Prop_equivalence "Consequence of propext."
 
 #rocq_ignore ofe_leibniz_subrelation "Generalized-rewriting subrelation; not needed in Lean."
 
-@[simp] theorem Leibniz.leibniz [OFE α] [Leibniz α] {x y : α} : x ≡ y ↔ x = y :=
-  ⟨eq_of_eqv, .of_eq⟩
-export OFE.Leibniz (leibniz)
-
-/-- The setoid on `X` identifying points that agree at every step index:
-`x ≈ y ↔ ∀ n, dist n x y`. -/
-@[reducible]
-def QuotientO {X : Type u} (dist : Nat → X → X → Prop) (heqv : ∀ {n}, Equivalence (dist n)) :
-    Setoid X where
-  r x y := ∀ n, dist n x y
-  iseqv :=
-    ⟨fun _ _ => heqv.refl _,
-     fun h n => heqv.symm (h n),
-     fun h₁ h₂ n => heqv.trans (h₁ n) (h₂ n)⟩
-
-/--
-EXPERIMENT: Explicit use of quotients to force quotiented (by Equiv) OFE to be Leibniz by
-quotienting by propositional equality.
-https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/Evaluating.20a.20specialization.20to.20Leibnize.20OFE.27s/with/606745235
-
-Build a `Leibniz` OFE from a step-indexed distance `dist` satisfying the OFE distance axioms
-by quotienting the carrier `X` by the OFE equivalence `fun x y => ∀ n, dist n x y`. -/
-@[reducible] def mkQuotient {X : Type u} (dist : Nat → X → X → Prop)
+/-- Build a Leibniz OFE on `Quotient s` from a step-indexed distance `dist` on the carrier,
+given that the setoid relation coincides with the OFE equivalence `fun x y => ∀ n, dist n x y`
+(hypothesis `hs`). Quotienting forces the resulting OFE equality to be Leibniz, while
+`Quotient.sound`/`Quotient.exact` keep speaking about the domain relation `s.r`. See
+https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/Evaluating.20a.20specialization.20to.20Leibnize.20OFE.27s/with/606745235 -/
+@[reducible] def ofQuotient {X : Type u} {s : Setoid X} (dist : SI → X → X → Prop)
     (heqv : ∀ {n}, Equivalence (dist n))
-    (hlt : ∀ {n m : Nat} {x y : X}, dist n x y → m < n → dist m x y) :
-    OFE (Quotient (QuotientO dist heqv)) :=
-  letI D : Nat → Quotient (QuotientO dist heqv) → Quotient (QuotientO dist heqv) → Prop :=
-    fun n => Quotient.lift₂ (dist n) fun _ _ _ _ hac hbd => propext
-      ⟨fun h => heqv.trans (heqv.trans (heqv.symm (hac n)) h) (hbd n),
-       fun h => heqv.trans (heqv.trans (hac n) h) (heqv.symm (hbd n))⟩
-  { Dist := D
-    Equiv x y := ∀ n, D n x y
+    (hlt : ∀ {n m} {x y : X}, dist n x y → m < n → dist m x y)
+    (hs : ∀ x y : X, s.r x y ↔ ∀ n, dist n x y) : OFE (Quotient s) :=
+  letI D : SI → Quotient s → Quotient s → Prop :=
+    fun n => Quotient.lift₂ (dist n) fun _ _ _ _ hac hbd => propext <|
+      have hac' := (hs _ _).mp hac
+      have hbd' := (hs _ _).mp hbd
+      ⟨fun h => heqv.trans (heqv.trans (heqv.symm (hac' n)) h) (hbd' n),
+       fun h => heqv.trans (heqv.trans (hac' n) h) (heqv.symm (hbd' n))⟩
+  { dist := D
     dist_eqv := by
       refine ⟨Quotient.ind fun a => heqv.refl a, fun {x y} h => ?_, fun {x y z} h₁ h₂ => ?_⟩
       · induction x, y using Quotient.ind₂ with | _ a b => exact heqv.symm h
       · induction x, y using Quotient.ind₂ with | _ a b =>
           induction z using Quotient.ind with | _ c => exact heqv.trans h₁ h₂
-    equiv_dist := .rfl
+    eq_dist' {x y} := by
+      induction x, y using Quotient.ind₂ with | _ a b =>
+        exact ⟨fun h n => (hs _ _).mp (Quotient.exact h) n,
+               fun h => Quotient.sound ((hs _ _).mpr h)⟩
     dist_lt := fun {n x y m} h hlt' => by
       induction x, y using Quotient.ind₂ with | _ a b => exact hlt h hlt' }
 
-theorem mkQuotient_leibniz {X : Type u} (dist : Nat → X → X → Prop)
-    (heqv : ∀ {n}, Equivalence (dist n))
-    (hlt : ∀ {n m : Nat} {x y : X}, dist n x y → m < n → dist m x y) :
-    @Leibniz _ (mkQuotient dist heqv hlt) :=
-  letI := mkQuotient dist heqv hlt
-  { eq_of_eqv := fun {x y} h => by
-      induction x, y using Quotient.ind₂ with | _ a b => exact Quotient.sound h }
+namespace ofQuotient
 
-namespace mkQuotient
+variable {X : Type u} {s : Setoid X}
 
-variable {X : Type u} {dist : Nat → X → X → Prop} {heqv : ∀ {n}, Equivalence (dist n)}
+@[reducible] def mk (s : Setoid X) (x : X) : Quotient s := Quotient.mk s x
 
-@[reducible] def mk (x : X) : Quotient (QuotientO dist heqv) := Quotient.mk _ x
+@[elab_as_elim] theorem ind {motive : Quotient s → Prop}
+    (mk : ∀ x : X, motive (mk s x)) (q : Quotient s) : motive q :=
+  Quotient.ind mk q
 
-@[elab_as_elim] theorem ind {motive : Quotient (QuotientO dist heqv) → Prop}
-    (h : ∀ x : X, motive (mk x)) (q : Quotient (QuotientO dist heqv)) : motive q :=
-  Quotient.ind h q
+@[elab_as_elim] theorem ind₂ {motive : Quotient s → Quotient s → Prop}
+    (mk : ∀ x y : X, motive (mk s x) (mk s y)) (x y : Quotient s) : motive x y :=
+  Quotient.ind₂ mk x y
 
-theorem sound {x y : X} (h : ∀ n, dist n x y) :
-    (mk x : Quotient (QuotientO dist heqv)) = mk y := Quotient.sound h
+@[elab_as_elim] theorem ind₃ {motive : Quotient s → Quotient s → Quotient s → Prop}
+    (mk : ∀ x y z : X, motive (mk s x) (mk s y) (mk s z)) (x y z : Quotient s) :
+    motive x y z :=
+  ind₂ (fun x y => Quotient.ind (mk x y)) x y z
 
-theorem mk_eq {x y : X} :
-    (mk x : Quotient (QuotientO dist heqv)) = mk y ↔ ∀ n, dist n x y :=
-  ⟨Quotient.exact, sound⟩
+theorem sound {x y : X} (h : s.r x y) : mk s x = mk s y := Quotient.sound h
+
+theorem exact {x y : X} (h : mk s x = mk s y) : s.r x y := Quotient.exact h
+
+theorem mk_eq {x y : X} : mk s x = mk s y ↔ s.r x y := ⟨exact, sound⟩
 
 @[reducible] def lift {β : Sort v} (f : X → β)
-    (resp : ∀ x y, (∀ n, dist n x y) → f x = f y) :
-    Quotient (QuotientO dist heqv) → β := Quotient.lift f resp
+    (resp : ∀ x y, s.r x y → f x = f y) : Quotient s → β := Quotient.lift f resp
 
 @[simp] theorem lift_mk {β : Sort v} (f : X → β) (resp) (x : X) :
-    lift (dist := dist) (heqv := heqv) f resp (mk x) = f x := rfl
+    lift (s := s) f resp (mk s x) = f x := rfl
 
 @[reducible] def lift₂ {β : Sort v} (f : X → X → β)
-    (resp : ∀ a b c d, (∀ n, dist n a c) → (∀ n, dist n b d) → f a b = f c d) :
-    Quotient (QuotientO dist heqv) → Quotient (QuotientO dist heqv) → β := Quotient.lift₂ f resp
+    (resp : ∀ a b c d, s.r a c → s.r b d → f a b = f c d) :
+    Quotient s → Quotient s → β := Quotient.lift₂ f resp
 
 @[simp] theorem lift₂_mk {β : Sort v} (f : X → X → β) (resp) (x y : X) :
-    lift₂ (dist := dist) (heqv := heqv) f resp (mk x) (mk y) = f x y := rfl
+    lift₂ (s := s) f resp (mk s x) (mk s y) = f x y := rfl
 
-@[reducible] def map {X' : Type u'} {dist' : Nat → X' → X' → Prop} {heqv' : ∀ {n}, Equivalence (dist' n)}
-    (f : X → X') (hf : ∀ n x y, dist n x y → dist' n (f x) (f y)) :
-    Quotient (QuotientO dist heqv) → Quotient (QuotientO dist' heqv') :=
-  Quotient.lift (fun x => mk (f x)) (fun _ _ h => Quotient.sound fun n => hf n _ _ (h n))
+@[reducible] def map {X' : Type u'} {s' : Setoid X'} (f : X → X')
+    (hf : ∀ x y, s.r x y → s'.r (f x) (f y)) : Quotient s → Quotient s' :=
+  Quotient.lift (fun x => mk s' (f x)) (fun _ _ h => sound (hf _ _ h))
 
-@[simp] theorem map_mk {X' : Type u'} {dist' : Nat → X' → X' → Prop}
-    {heqv' : ∀ {n}, Equivalence (dist' n)} (f : X → X') (hf) (x : X) :
-    map (dist := dist) (heqv := heqv) (dist' := dist') (heqv' := heqv') f hf (mk x) = mk (f x) := rfl
+@[simp] theorem map_mk {X' : Type u'} {s' : Setoid X'} (f : X → X') (hf) (x : X) :
+    map (s := s) (s' := s') f hf (mk s x) = mk s' (f x) := rfl
 
-theorem dist_mk {hlt : ∀ {n m : Nat} {x y : X}, dist n x y → m < n → dist m x y}
-    {n} {x y : X} : (mkQuotient dist heqv hlt).Dist n (mk x) (mk y) ↔ dist n x y := Iff.rfl
+theorem dist_mk {dist : SI → X → X → Prop} {heqv : ∀ {n}, Equivalence (dist n)}
+    {hlt : ∀ {n m} {x y : X}, dist n x y → m < n → dist m x y}
+    {hs : ∀ x y : X, s.r x y ↔ ∀ n, dist n x y} {n} {x y : X} :
+    (ofQuotient dist heqv hlt hs).dist n (mk s x) (mk s y) ↔ dist n x y := Iff.rfl
 
-end mkQuotient
+end ofQuotient
 
 /-- A morphism between OFEs, written `α -n> β`, is defined to be a function that is
 non-expansive. -/
@@ -346,8 +377,8 @@ non-expansive. -/
 #rocq_ignore ofe_mor_proper "Derived from nonexpansivity"
 #rocq_ignore ofe_mor_ext "Use ext"
 
-@[inherit_doc]
-infixr:25 " -n> " => Hom
+/-- Non-expansive functions. -/
+notation:25 α:26 " -n> " β:25 => Iris.OFE.Hom α β
 
 instance [OFE α] [OFE β] : CoeFun (α -n> β) (fun _ => α → β) := ⟨Hom.f⟩
 instance [OFE α] [OFE β] (f : α -n> β) : NonExpansive f := f.ne
@@ -376,6 +407,14 @@ protected def Hom.comp [OFE α] [OFE β] [OFE γ] (g : β -n> γ) (f : α -n> β
 theorem Hom.comp_assoc [OFE α] [OFE β] [OFE γ] [OFE δ]
     (h : γ -n> δ) (g : β -n> γ) (f : α -n> β) : (h.comp g).comp f = h.comp (g.comp f) := rfl
 
+@[rocq_alias cconst]
+protected def Hom.const [OFE α] [OFE β] (x : β) : α -n> β where
+  f := Function.const α x
+  ne.ne _ _ _ _ := Dist.rfl
+
+@[simp] theorem Hom.const_apply [OFE α] [OFE β] {x : β} {a : α} :
+    (Hom.const x : α -n> β) a = x := rfl
+
 /-- Construct a `Hom` from a subtype bundling a function with its nonexpansiveness proof. -/
 def Hom.ofSubtype [OFE α] [OFE β] (f : { f : α → β // NonExpansive f }) : α -n> β :=
   ⟨f.val, f.property⟩
@@ -384,17 +423,20 @@ def Hom.ofSubtype [OFE α] [OFE β] (f : { f : α → β // NonExpansive f }) : 
   [contractive : Contractive f]
   ne := ne_of_contractive f
 
-infixr:25 " -c> " => ContractiveHom
+/-- Contractive functions. -/
+notation:25 α:26 " -c> " β:25 => Iris.OFE.ContractiveHom α β
 
 instance [OFE α] [OFE β] : CoeFun (α -c> β) (fun _ => α → β) := ⟨fun x => x.toHom.f⟩
 instance [OFE α] [OFE β] (f : α -c> β) : Contractive f := f.contractive
 
-def _root_.Function.toContractiveHom (f : α → β) [OFE α] [OFE β] [ι : OFE.Contractive f] : α -c> β where
+def _root_.Function.toContractiveHom (f : α → β) [OFE α] [OFE β] [ι : Contractive f] :
+    α -c> β where
   f := f
   contractive := ι
 
-@[simp] theorem _root_.Function.toContractiveHom_apply {f : α → β} [OFE α] [OFE β] [ι : OFE.Contractive f] {x} :
-  f.toContractiveHom x = f x := by rfl
+@[simp] theorem _root_.Function.toContractiveHom_apply {f : α → β} [OFE α] [OFE β]
+    [ι : Contractive f] {x} :
+  Function.toContractiveHom f x = f x := by rfl
 
 theorem InvImage.equivalence {α : Sort u} {β : Sort v}
     {r : β → β → Prop} {f : α → β} (H : Equivalence r) : Equivalence (InvImage r f) where
@@ -403,23 +445,33 @@ theorem InvImage.equivalence {α : Sort u} {β : Sort v}
   trans := H.trans
 
 @[rocq_alias unit_ofe_mixin]
-instance : OFE Unit where
-  Equiv _ _ := True
-  Dist _ _ _ := True
+instance unitOFE : OFE Unit where
+  dist _ _ _ := True
   dist_eqv := ⟨fun _ => ⟨⟩, id, fun _ => id⟩
-  equiv_dist := by simp
+  eq_dist' := by simp
   dist_lt _ _ := ⟨⟩
 #rocq_ignore unitO "Use the unit type"
 #rocq_ignore unit_dist "Local Dist instance; folded into Lean's OFE Unit instance."
 
-instance : DiscreteE (() : Unit) := ⟨fun _ => trivial⟩
+instance : DiscreteE (() : Unit) := ⟨fun _ => Subsingleton.elim _ _⟩
+
+@[rocq_alias Empty_set_ofe_mixin]
+instance : OFE Empty where
+  dist _ _ _ := True
+  dist_eqv := ⟨fun _ => ⟨⟩, id, fun _ => id⟩
+  eq_dist' {x} := x.elim
+  dist_lt _ _ := ⟨⟩
+#rocq_ignore Empty_setO "Use the empty type"
+#rocq_ignore Empty_set_dist "Local Dist instance; folded into Lean's OFE Empty instance."
 
 instance [OFE α] : OFE (ULift α) where
-  Equiv x y := x.down ≡ y.down
-  Dist n x y := x.down ≡{n}≡ y.down
+  dist n x y := x.down ≡{n}≡ y.down
   dist_eqv := InvImage.equivalence dist_eqv
-  equiv_dist := equiv_dist
+  eq_dist' {x y} := by cases x; cases y; rw [ULift.up.injEq]; exact eq_dist
   dist_lt := dist_lt
+
+instance [OFE α] [Discrete α] : Discrete (ULift α) where
+  discrete_0 h := congrArg ULift.up (discrete_0 h)
 
 def uliftUpHom [OFE α] : α -n> ULift α where
   f := .up
@@ -429,23 +481,11 @@ def uliftDownHom [OFE α] : ULift α -n> α where
   f := ULift.down
   ne.1 _ _ _ := id
 
-def _root_.Option.Forall₂ (R : α → β → Prop) : Option α → Option β → Prop
-  | none, none => True
-  | some a, some b => R a b
-  | _, _ => False
-
-theorem _root_.Option.Forall₂.equivalence {R : α → α → Prop}
-    (H : Equivalence R) : Equivalence (Option.Forall₂ R) where
-  refl | none => trivial | some _ => H.1 _
-  symm {x y} := by cases x <;> cases y <;> simp [Option.Forall₂]; apply H.2
-  trans {x y z} := by cases x <;> cases y <;> cases z <;> simp [Option.Forall₂]; apply H.3
-
 @[rocq_alias option_ofe_mixin]
 instance [OFE α] : OFE (Option α) where
-  Equiv := Option.Forall₂ Equiv
-  Dist n := Option.Forall₂ (Dist n)
+  dist n := Option.Forall₂ (Dist n)
   dist_eqv := Option.Forall₂.equivalence dist_eqv
-  equiv_dist {x y} := by cases x <;> cases y <;> simp [Option.Forall₂]; apply equiv_dist
+  eq_dist' {x y} := by cases x <;> cases y <;> simp [Option.Forall₂]; exact eq_dist
   dist_lt {_ x y _} := by cases x <;> cases y <;> simp [Option.Forall₂]; apply dist_lt
 #rocq_ignore optionO "Use Option"
 #rocq_ignore option_dist "Local Dist instance; folded into Lean's OFE (Option α) instance."
@@ -455,31 +495,22 @@ instance [OFE α] : OFE (Option α) where
 instance [OFE α] [OFE.Discrete α] : OFE.Discrete (Option α) where
   discrete_0 {mx my} e :=
     match mx, my with
-    | none,   none   => e
-    | none,   some _ => e
-    | some _, none   => e
-    | some x, some y => show x ≡ y from discrete_0 e
-
-@[simp] theorem some_eqv_some [OFE α] {x y : α} : (some x ≡ some y) ↔ x ≡ y := .rfl
-@[simp] theorem not_some_eqv_none [OFE α] {x : α} : ¬some x ≡ none := id
-@[simp] theorem not_none_eqv_some [OFE α] {x : α} : ¬none ≡ some x := id
+    | none,   none   => rfl
+    | none,   some _ => e.elim
+    | some _, none   => e.elim
+    | some _, some _ => congrArg some (discrete_0 e)
 
 @[simp, rocq_alias dist_Some]
 theorem some_dist_some [OFE α] {n} {x y : α} : (some x ≡{n}≡ some y) ↔ x ≡{n}≡ y := .rfl
 @[simp] theorem not_some_dist_none [OFE α] {n} {x : α} : ¬some x ≡{n}≡ none := id
 @[simp] theorem not_none_dist_some [OFE α] {n} {x : α} : ¬none ≡{n}≡ some x := id
 
-theorem equiv_some [OFE α] {o : Option α} {y : α} (e : o ≡ some y) :
-    ∃ z, o = some z ∧ z ≡ y := by
-  let .some x := o
-  exact ⟨x, rfl, e⟩
-
-theorem equiv_none [OFE α] {o : Option α} : o ≡ none ↔ o = none :=
-  ⟨fun _ => let .none := o; rfl, (· ▸ .rfl)⟩
+theorem equiv_some {o : Option α} {y : α} (e : o = some y) :
+    ∃ z, o = some z ∧ z = y := ⟨y, e, rfl⟩
 
 @[rocq_alias dist_None]
-theorem dist_none [OFE α] {o : Option α} : o ≡{n}≡ none ↔ o = none :=
-  ⟨fun _ => let .none := o; rfl, (· ▸ .rfl)⟩
+theorem dist_none {n} [OFE α] {o : Option α} : o ≡{n}≡ none ↔ o = none :=
+  ⟨fun h => by cases o with | none => rfl | some _ => exact h.elim, (· ▸ .rfl)⟩
 
 @[rocq_alias dist_Some_inv_r']
 theorem dist_some [OFE α] {n mx y} (h : mx ≡{n}≡ some y) :
@@ -491,27 +522,52 @@ theorem dist_some [OFE α] {n mx y} (h : mx ≡{n}≡ some y) :
     | some t => ⟨t, rfl, (e2 ▸ e1 : some t ≡{n}≡ some y)⟩
     | none => False.elim (e2 ▸ e1 : none ≡{n}≡ some y)
 
-instance [OFE α] [Leibniz α] : Leibniz (Option α) where
-  eq_of_eqv {x y} H :=
-    match x, y, H with
-    | none, none, _ => rfl
-    | some _, some _, h => congrArg some (Leibniz.eq_of_eqv h)
+/-- Data-valued form of `dist_some`, for building the witnesses of `ORA.extend`. -/
+def distSome [OFE α] {n} {mx : Option α} {y : α} (h : mx ≡{n}≡ some y) :
+    (z : α) ×' mx = some z ∧ y ≡{n}≡ z :=
+  match mx, h with
+  | some _, h => ⟨_, rfl, h.symm⟩
+  | none, h => h.elim
 
-instance [OFE α] [Discrete α] : Discrete (Option α) where
-  discrete_0 {x y} H :=
-    match x, y with
-    | none, none => H
-    | some _, some _ => some_eqv_some.mpr (discrete_0 H)
+#rocq_ignore Some_dist_inj "`Inj` instance; subsumed by `some_dist_some`."
+
+@[rocq_alias dist_Some_inv_l]
+theorem dist_some_inv_l [OFE α] {n} {mx my : Option α} {x} (h : mx ≡{n}≡ my)
+    (e : mx = some x) : ∃ y, my = some y ∧ x ≡{n}≡ y := by
+  subst e; exact dist_some h.symm
+
+@[rocq_alias dist_Some_inv_r]
+theorem dist_some_inv_r [OFE α] {n} {mx my : Option α} {y} (h : mx ≡{n}≡ my)
+    (e : my = some y) : ∃ x, mx = some x ∧ x ≡{n}≡ y := by
+  subst e; obtain ⟨z, hz, hd⟩ := dist_some h; exact ⟨z, hz, hd.symm⟩
+
+@[rocq_alias dist_Some_inv_l']
+theorem dist_some_inv_l' [OFE α] {n} {my : Option α} {x} (h : some x ≡{n}≡ my) :
+    ∃ x', some x' = my ∧ x ≡{n}≡ x' :=
+  let ⟨y, hy, hd⟩ := dist_some_inv_l h rfl; ⟨y, hy.symm, hd⟩
+
+#rocq_ignore is_Some_ne "`Proper (dist n ==> iff)` setoid instance; not needed in Lean."
+
+@[rocq_alias fmap_Some_dist]
+theorem fmap_some_dist [OFE β] (f : α → β) {mx : Option α} {y : β} {n} :
+    (Option.map f mx ≡{n}≡ some y) ↔ ∃ x, mx = some x ∧ y ≡{n}≡ f x := by
+  refine ⟨fun h => ?_, ?_⟩
+  · match mx with
+    | none => exact absurd h not_none_dist_some
+    | some x => exact ⟨x, rfl, (some_dist_some.mp h).symm⟩
+  · rintro ⟨x, rfl, hd⟩; exact some_dist_some.mpr hd.symm
+
+#rocq_ignore option_fmap_dist_inj "`Inj` instance for `fmap`; setoid rewriting, not needed in Lean."
 
 @[rocq_alias Some_ne]
-instance OFE.Option.some.ne [OFE α] : OFE.NonExpansive (some : α → Option α) := ⟨fun _ _ _ => id⟩
+instance Option.some.ne [OFE α] : NonExpansive (some : α → Option α) := ⟨fun _ _ _ => id⟩
 
 @[rocq_alias Some_discrete]
-instance Option.some_is_discrete [OFE α] {e : α} [OFE.DiscreteE e] : OFE.DiscreteE (some e) where
+instance Option.some_is_discrete [OFE α] {e : α} [DiscreteE e] : DiscreteE (some e) where
   discrete {y} h :=
     match y with
     | .none => absurd h not_some_dist_none
-    | .some y => show e ≡ y from DiscreteE.discrete h
+    | .some _ => congrArg some (DiscreteE.discrete h)
 
 /-- Note: Not an instance, due to instance coherence problems. -/
 theorem Option.ne_match [OFE α] {B : Type _} [OFE B]
@@ -535,28 +591,29 @@ instance Option.bind_fun_ne [OFE α] [OFE β] (f : α → Option β) [NonExpansi
     | some _ => (dist_some Hx).choose_spec.left ▸ (NonExpansive.ne (f := f) (dist_some Hx).choose_spec.right.symm)
     | none => (dist_none.mp Hx).symm ▸ .rfl
 
-theorem Option.bind_dist [OFE α] [OFE β] {x : Option α} {f g : α → Option β} (H : ∀ x, f x ≡{n}≡ g x) : Option.bind x f ≡{n}≡ Option.bind x g :=
+theorem Option.bind_dist [OFE β] {x : Option α} {f g : α → Option β} (H : ∀ x, f x ≡{n}≡ g x) :
+    x.bind f ≡{n}≡ x.bind g :=
   match x with
   | some _ => H _
   | none => .rfl
 
-theorem Option.bind_equiv [OFE α] [OFE β] {x : Option α} {f g : α → Option β} (H : ∀ x, f x ≡ g x) : Option.bind x f ≡ Option.bind x g :=
+theorem Option.bind_equiv {x : Option α} {f g : α → Option β} (H : ∀ x, f x = g x) :
+    x.bind f = x.bind g :=
   match x with
   | some _ => H _
-  | none => .rfl
+  | none => rfl
 
 abbrev OFEFun {α : Type _} (β : α → Type _) := ∀ a, OFE (β a)
 
 @[rocq_alias discrete_fun_ofe_mixin]
 instance [OFEFun (β : α → _)] : OFE ((x : α) → β x) where
-  Equiv f g := ∀ x, f x ≡ g x
-  Dist n f g := ∀ x, f x ≡{n}≡ g x
+  dist n f g := ∀ x, f x ≡{n}≡ g x
   dist_eqv := {
     refl _ _ := dist_eqv.refl _
     symm h _ := dist_eqv.symm (h _)
     trans h1 h2 _ := dist_eqv.trans (h1 _) (h2 _)
   }
-  equiv_dist {_ _} := by simp [equiv_dist]; apply forall_comm
+  eq_dist' {_ _} := funext_iff.trans <| (forall_congr' fun _ => eq_dist).trans forall_comm
   dist_lt h1 h2 _ := dist_lt (h1 _) h2
 #rocq_ignore discrete_funO "Use a function type"
 #rocq_ignore discrete_fun "Lean uses `(x : α) → β x` directly with `OFEFun`."
@@ -565,14 +622,13 @@ instance [OFEFun (β : α → _)] : OFE ((x : α) → β x) where
 
 @[rocq_alias ofe_mor_ofe_mixin]
 instance [OFE α] [OFE β] : OFE (α -n> β) where
-  Equiv f g := f.f ≡ g.f
-  Dist n f g := f.f ≡{n}≡ g.f
+  dist n f g := f.f ≡{n}≡ g.f
   dist_eqv := {
     refl _ := dist_eqv.refl _
     symm h := dist_eqv.symm h
     trans h1 h2 := dist_eqv.trans h1 h2
   }
-  equiv_dist := equiv_dist
+  eq_dist' {_ _} := Hom.ext_iff.trans eq_dist
   dist_lt := dist_lt
 #rocq_ignore ofe_morO "Use Hom type"
 #rocq_ignore ofe_mor_equiv "Inlined in OFE (α -n> β) instance"
@@ -585,32 +641,34 @@ instance ofe_mor_car_ne [OFE α] [OFE β] :
   ne _ _ _ hf _ _ hx := dist_eqv.trans (hf _) (NonExpansive.ne hx)
 
 @[rocq_alias ofe_mor_car_proper]
-theorem ofe_mor_car_proper [OFE α] [OFE β] ⦃f g : α -n> β⦄ (hfg : f ≡ g)
-    ⦃x y : α⦄ (hxy : x ≡ y) : f x ≡ g y :=
-  NonExpansive₂.eqv (f := fun (f : α -n> β) (x : α) => f x) hfg hxy
+theorem ofe_mor_car_proper [OFE α] [OFE β] ⦃f g : α -n> β⦄ (hfg : f = g)
+    ⦃x y : α⦄ (hxy : x = y) : f x = g y := by
+  subst hfg; subst hxy; rfl
 
 @[rocq_alias ofe_mor_inhabited]
 instance [OFE α] [OFE β] [Inhabited β] : Inhabited (α -n> β) where
   default := { f := Function.const α default, ne := const_ne }
 
 instance [OFE α] [OFE β] : OFE (α -c> β) where
-  Equiv f g := Equiv f.toHom g.toHom
-  Dist n f g := Dist n f.toHom g.toHom
+  dist n f g := f.toHom ≡{n}≡ g.toHom
   dist_eqv := {
     refl _ := dist_eqv.refl _
     symm h := dist_eqv.symm h
     trans h1 h2 := dist_eqv.trans h1 h2
   }
-  equiv_dist := equiv_dist
+  eq_dist' {_ _} := ContractiveHom.ext_iff.trans eq_dist
   dist_lt := dist_lt
 
-instance instLeibnizHom [OFE α] [OFE β] [Leibniz α] [Leibniz β] : Leibniz (α -n> β) where
-  eq_of_eqv {x y} H := by
-    ext i; exact eq_of_eqv (H i)
+/-- Evaluation at a fixed argument is non-expansive for the pointwise OFE.
+Instance priority is lowered for performance. -/
+@[instance 100]
+theorem apply_ne [OFEFun (β : α → _)] (x : α) :
+    NonExpansive (fun f : (x : α) → β x => f x) where
+  ne _ _ _ H := H x
 
 def applyHom [OFEFun (β : α → _)] (x : α) : ((x : α) → β x) -n> β x where
   f f := f x
-  ne.1 _ _ _ H := H x
+  ne := apply_ne x
 
 def applyNe [OFE α] [OFE β] (x : α) : (α -n> β) -n> β where
   f f := f x
@@ -630,24 +688,40 @@ def mapCodHom [OFEFun (β₁ : α → _)] [OFEFun β₂]
 #rocq_ignore discrete_fun_map_ne "Implicit in type of mapCodHom"
 #rocq_ignore discrete_funO_map_ne "Implicit in type of mapCodHom"
 
+@[rocq_alias discrete_fun_map_id]
+theorem mapCodHom_id [OFEFun (β : α → _)] (g : (x : α) → β x) :
+    mapCodHom (fun _ => Hom.id) g = g := rfl
+
+@[rocq_alias discrete_fun_map_compose]
+theorem mapCodHom_compose [OFEFun (β₁ : α → _)] [OFEFun β₂] [OFEFun β₃]
+    (f₁ : ∀ x, β₁ x -n> β₂ x) (f₂ : ∀ x, β₂ x -n> β₃ x) (g : (x : α) → β₁ x) :
+  mapCodHom (fun x => (f₂ x).comp (f₁ x)) g = mapCodHom f₂ (mapCodHom f₁ g) := rfl
+
+open Classical in
+@[rocq_alias discrete_fun_lookup_discrete]
+instance mapCod_lookup_discrete [OFEFun (β : α → _)]
+    (f : (x : α) → β x) (x : α) [hf : DiscreteE f] : DiscreteE (f x) where
+  discrete {y} h := by
+    let g : (x' : α) → β x' := fun x' => if e : x = x' then e ▸ y else f x'
+    have hgx : g x = y := dite_eq_left rfl
+    have hne : ∀ x', x ≠ x' → g x' = f x' := fun x' e => dite_eq_right e
+    refine (congrFun (hf.discrete fun x' => ?_) x).trans hgx
+    by_cases e : x = x'
+    · grind
+    · exact .of_eq (hne x' e).symm
+
 @[rocq_alias prod_ofe_mixin]
 instance [OFE α] [OFE β] : OFE (α × β) where
-  Equiv a b := a.1 ≡ b.1 ∧ a.2 ≡ b.2
-  Dist n a b := a.1 ≡{n}≡ b.1 ∧ a.2 ≡{n}≡ b.2
+  dist n a b := a.1 ≡{n}≡ b.1 ∧ a.2 ≡{n}≡ b.2
   dist_eqv := {
     refl _ := ⟨dist_eqv.refl _, dist_eqv.refl _⟩
     symm h := ⟨dist_eqv.symm h.1, dist_eqv.symm h.2⟩
     trans h1 h2 := ⟨dist_eqv.trans h1.1 h2.1, dist_eqv.trans h1.2 h2.2⟩
   }
-  equiv_dist {_ _} := by simp [equiv_dist, forall_and]
+  eq_dist' {_ _} := Prod.ext_iff.trans <| (and_congr eq_dist eq_dist).trans forall_and.symm
   dist_lt h1 h2 := ⟨dist_lt h1.1 h2, dist_lt h1.2 h2⟩
 #rocq_ignore prodO "Use product type"
 #rocq_ignore prod_dist "Implicit in Prod OFE"
-
-theorem equiv_fst [OFE α] [OFE β] {x y : α × β} (h : x ≡ y) : x.fst ≡ y.fst := h.left
-theorem equiv_snd [OFE α] [OFE β] {x y : α × β} (h : x ≡ y) : x.snd ≡ y.snd := h.right
-theorem equiv_prod_ext [OFE α] [OFE β] {x₁ x₂ : α} {y₁ y₂ : β}
-    (ex : x₁ ≡ x₂) (ey : y₁ ≡ y₂) : (x₁, y₁) ≡ (x₂, y₂) := ⟨ex, ey⟩
 
 theorem dist_fst {n} [OFE α] [OFE β] {x y : α × β} (h : x ≡{n}≡ y) : x.fst ≡{n}≡ y.fst := h.left
 theorem dist_snd {n} [OFE α] [OFE β] {x y : α × β} (h : x ≡{n}≡ y) : x.snd ≡{n}≡ y.snd := h.right
@@ -659,6 +733,8 @@ theorem dist_prod_ext {n} [OFE α] [OFE β] {x₁ x₂ : α} {y₁ y₂ : β}
 @[rocq_alias pair_ne]
 instance Prod.mk_ne [OFE α] [OFE β] : NonExpansive₂ (Prod.mk (α := α) (β := β)) where
   ne _ _ _ hx _ _ hy := dist_prod_ext hx hy
+
+#rocq_ignore pair_dist_inj "`Inj2` instance; subsumed by the definitional `pair_dist`."
 
 /-- Note: Not an instance, due to instance coherence problems. -/
 theorem prod_mk_ne_left [OFE α] [OFE β] (b : β) : NonExpansive (β := α × β) (·, b) :=
@@ -677,23 +753,50 @@ instance [OFE α] [OFE β] : NonExpansive (Prod.snd (α := α) (β := β)) :=
   ⟨fun {_ _ _} h => dist_snd h⟩
 
 /-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias uncurry_ne]
 theorem NonExpansive₂.uncurry [OFE α] [OFE β] [OFE γ] {f : α → β → γ} (hf : NonExpansive₂ f) :
     NonExpansive (Function.uncurry f) :=
   ⟨fun {_ _ _} (h : _ ∧ _) => hf.ne h.1 h.2⟩
+
+/-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias curry_ne]
+theorem NonExpansive.curry [OFE α] [OFE β] [OFE γ] {f : α × β → γ} (hf : NonExpansive f) :
+    NonExpansive₂ (Function.curry f) :=
+  ⟨fun _ _ _ hx _ _ hy => hf.ne ⟨hx, hy⟩⟩
+
+/-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias curry3_ne]
+theorem NonExpansive.curry₃ [OFE α] [OFE β] [OFE γ] [OFE δ] {f : α × β × γ → δ}
+    (hf : NonExpansive f) : NonExpansive₃ fun a b c => f (a, b, c) :=
+  ⟨fun _ _ _ hx _ _ hy _ _ hz => hf.ne ⟨hx, hy, hz⟩⟩
+
+/-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias uncurry3_ne]
+theorem NonExpansive₃.uncurry [OFE α] [OFE β] [OFE γ] [OFE δ] {f : α → β → γ → δ}
+    (hf : NonExpansive₃ f) : NonExpansive fun p : α × β × γ => f p.1 p.2.1 p.2.2 :=
+  ⟨fun {_ _ _} (h : _ ∧ _ ∧ _) => hf.ne h.1 h.2.1 h.2.2⟩
+
+/-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias curry4_ne]
+theorem NonExpansive.curry₄ [OFE α] [OFE β] [OFE γ] [OFE δ] [OFE ε] {f : α × β × γ × δ → ε}
+    (hf : NonExpansive f) : NonExpansive₄ fun a b c d => f (a, b, c, d) :=
+  ⟨fun _ _ _ hx _ _ hy _ _ hz _ _ hw => hf.ne ⟨hx, hy, hz, hw⟩⟩
+
+/-- Note: Not an instance, due to instance coherence problems. -/
+@[rocq_alias uncurry4_ne]
+theorem NonExpansive₄.uncurry [OFE α] [OFE β] [OFE γ] [OFE δ] [OFE ε] {f : α → β → γ → δ → ε}
+    (hf : NonExpansive₄ f) : NonExpansive fun p : α × β × γ × δ => f p.1 p.2.1 p.2.2.1 p.2.2.2 :=
+  ⟨fun {_ _ _} (h : _ ∧ _ ∧ _ ∧ _) => hf.ne h.1 h.2.1 h.2.2.1 h.2.2.2⟩
 
 @[rocq_alias prod_discrete]
 instance prod.is_discrete [OFE α] [OFE β] {a : α} {b : β} [DiscreteE a] [DiscreteE b] :
     DiscreteE (a, b) := by
   constructor
-  intro y H; refine ⟨DiscreteE.discrete H.1, DiscreteE.discrete H.2⟩
+  intro y H; exact Prod.ext (DiscreteE.discrete H.1) (DiscreteE.discrete H.2)
 
 @[rocq_alias prod_ofe_discrete]
 instance instDiscreteProd [OFE α] [OFE β] [Discrete α] [Discrete β] : Discrete (α × β) where
-  discrete_0 H := ⟨discrete_0 H.1, discrete_0 H.2⟩
-
-instance [OFE α] [OFE β] [Leibniz α] [Leibniz β] : Leibniz (α × β) where
-  eq_of_eqv {x y} H := match x, y with
-    | ⟨_, _⟩, ⟨_, _⟩ => Prod.ext (eq_of_eqv H.1) (eq_of_eqv H.2)
+  discrete_0 H := Prod.ext (discrete_0 H.1) (discrete_0 H.2)
 
 section sum
 
@@ -701,11 +804,7 @@ variable [OFE α] [OFE β]
 
 @[rocq_alias sum_ofe_mixin]
 instance : OFE (α ⊕ β) where
-  Equiv
-    | .inl a, .inl b => a ≡ b
-    | .inr a, .inr b => a ≡ b
-    | _, _ => False
-  Dist n
+  dist n
     | .inl a, .inl b => a ≡{n}≡ b
     | .inr a, .inr b => a ≡{n}≡ b
     | _, _ => False
@@ -725,11 +824,12 @@ instance : OFE (α ⊕ β) where
     | .inl _, .inr _, _ => h1.elim
     | _, .inr _, .inl _ => h2.elim
   }
-  equiv_dist {a b} := match a, b with
-    | .inl _, .inl _ => equiv_dist
-    | .inr _, .inr _ => equiv_dist
-    | .inl _, .inr _ => ⟨(False.elim ·), fun x => x 0⟩
-    | .inr _, .inl _ => ⟨(False.elim ·), fun x => x 0⟩
+  eq_dist' {a b} := by
+    match a, b with
+    | .inl _, .inl _ => rw [Sum.inl.injEq]; exact eq_dist
+    | .inr _, .inr _ => rw [Sum.inr.injEq]; exact eq_dist
+    | .inl _, .inr _ => exact ⟨fun h => (nomatch h), fun x => (x 0).elim⟩
+    | .inr _, .inl _ => exact ⟨fun h => (nomatch h), fun x => (x 0).elim⟩
   dist_lt {_ a b} := match a, b with
     | .inl _, .inl _ => dist_lt
     | .inr _, .inr _ => dist_lt
@@ -738,19 +838,19 @@ instance : OFE (α ⊕ β) where
 #rocq_ignore sumO "Use sum type"
 #rocq_ignore sum_dist "Inlined in OFE (α ⊕ β) instance"
 
-
-theorem equiv_inl {x y : α} (h : x ≡ y) : (.inl x : α ⊕ β) ≡ .inl y := h
-theorem equiv_inr {x y : β} (h : x ≡ y) : (.inr x : α ⊕ β) ≡ .inr y := h
-theorem equiv_ext_left {x y : α} (h : (.inl x : α ⊕ β) ≡ .inl y) : x ≡ y := h
-theorem equiv_ext_right {x y : β} (h : (.inr x : α ⊕ β) ≡ .inr y) : x ≡ y := h
-
 theorem dist_inl (h : x ≡{n}≡ y) : (.inl x : α ⊕ β) ≡{n}≡ .inl y := h
 theorem dist_inr {x y : β} (h : x ≡{n}≡ y) : (.inr x : α ⊕ β) ≡{n}≡ .inr y := h
+@[rocq_alias inl_ne_inj]
 theorem dist_ext_left {x y : α} (h : (.inl x : α ⊕ β) ≡{n}≡ .inl y) : x ≡{n}≡ y := h
+@[rocq_alias inr_ne_inj]
 theorem dist_ext_right {x y : β} (h : (.inr x : α ⊕ β) ≡{n}≡ .inr y) : x ≡{n}≡ y := h
+@[simp, grind =] theorem inl_dist_inl {x y : α} : (.inl x : α ⊕ β) ≡{n}≡ .inl y ↔ x ≡{n}≡ y := .rfl
+@[simp, grind =] theorem inr_dist_inr {x y : β} : (.inr x : α ⊕ β) ≡{n}≡ .inr y ↔ x ≡{n}≡ y := .rfl
+@[simp, grind .] theorem not_inl_dist_inr {x : α} {y : β} : ¬(.inl x : α ⊕ β) ≡{n}≡ .inr y := id
+@[simp, grind .] theorem not_inr_dist_inl {x : β} {y : α} : ¬(.inr x : α ⊕ β) ≡{n}≡ .inl y := id
 
 @[rocq_alias inl_ne]
-instance instNonExpansiveInl: NonExpansive (Sum.inl (α := α) (β := β)) where
+instance instNonExpansiveInl : NonExpansive (Sum.inl (α := α) (β := β)) where
   ne {_ _ _} H := dist_inl H
 
 @[rocq_alias inr_ne]
@@ -769,7 +869,7 @@ instance instNonExpansiveElim [OFE γ] {f₁ : α → γ} {f₂ : β → γ} [No
 theorem discreteE_inl {a : α} (Ha : DiscreteE a) : DiscreteE (.inl a : α ⊕ β) := by
   constructor
   rintro (_|_) H
-  · exact Ha.discrete H
+  · exact congrArg Sum.inl (Ha.discrete H)
   · exact H.elim
 
 @[rocq_alias inr_discrete]
@@ -777,20 +877,13 @@ theorem discreteE_inr {a : β} (Ha : DiscreteE a) : DiscreteE (.inr a : α ⊕ �
   constructor
   rintro (_|_) H
   · exact H.elim
-  · exact Ha.discrete H
+  · exact congrArg Sum.inr (Ha.discrete H)
 
 @[rocq_alias sum_ofe_discrete]
 instance instDiscreteSum [Discrete α] [Discrete β] : Discrete (α ⊕ β) where
   discrete_0 {x y} := match x, y with
-    | .inl _, .inl _ => (equiv_inl <| discrete_0 (α := α) <| dist_ext_left ·)
-    | .inr _, .inr _ => (equiv_inr <| discrete_0 (α := β) <| dist_ext_right ·)
-    | .inl _, .inr _ => (False.elim ·)
-    | .inr _, .inl _ => (False.elim ·)
-
-instance instLeibnizSum [Leibniz α] [Leibniz β] : Leibniz (α ⊕ β) where
-  eq_of_eqv {x y} := match x, y with
-    | .inl _, .inl _ => (Sum.inl.inj_iff.mpr <| eq_of_eqv <| equiv_ext_left ·)
-    | .inr _, .inr _ => (Sum.inr.inj_iff.mpr <| eq_of_eqv <| equiv_ext_right ·)
+    | .inl _, .inl _ => (congrArg Sum.inl <| discrete_0 (α := α) <| dist_ext_left ·)
+    | .inr _, .inr _ => (congrArg Sum.inr <| discrete_0 (α := β) <| dist_ext_right ·)
     | .inl _, .inr _ => (False.elim ·)
     | .inr _, .inl _ => (False.elim ·)
 
@@ -798,10 +891,9 @@ end sum
 
 @[rocq_alias sig_ofe_mixin]
 instance [OFE α] (P : α → Prop) : OFE (Subtype P) where
-  Equiv x y := x.val ≡ y.val
-  Dist n x y := x.val ≡{n}≡ y.val
+  dist n x y := x.val ≡{n}≡ y.val
   dist_eqv := ⟨fun _ => .rfl, Dist.symm, Dist.trans⟩
-  equiv_dist := equiv_dist
+  eq_dist' {_ _} := Subtype.ext_iff.trans eq_dist
   dist_lt := dist_lt
 #rocq_ignore sigO "Use subtype"
 #rocq_ignore sig_equiv "Local Equiv instance; folded into Lean's OFE (Subtype P) instance."
@@ -810,8 +902,16 @@ instance [OFE α] (P : α → Prop) : OFE (Subtype P) where
 #rocq_ignore sig_dist_def "Trivial unfolding lemma; definitional in Lean."
 
 @[rocq_alias sig_discrete]
+instance [OFE α] (P : α → Prop) (x : Subtype P) [DiscreteE x.val] : DiscreteE x where
+  discrete h := Subtype.ext <| DiscreteE.discrete h
+
+@[rocq_alias sig_ofe_discrete]
 instance [OFE α] [Discrete α] (P : α → Prop) : Discrete (Subtype P) where
-  discrete_0 h := @Discrete.discrete_0 α _ _ _ _ h
+  discrete_0 h := Subtype.ext <| Discrete.discrete_0 h
+
+@[rocq_alias exist_ne]
+theorem exist_ne [OFE α] {P : α → Prop} {n} {a1 a2 : α} (H1 : P a1) (H2 : P a2)
+    (h : a1 ≡{n}≡ a2) : (⟨a1, H1⟩ : Subtype P) ≡{n}≡ ⟨a2, H2⟩ := h
 
 @[rocq_alias proj1_sig_ne]
 instance [OFE α] (P : α → Prop) : NonExpansive (Subtype.val : Subtype P → α) where
@@ -829,8 +929,7 @@ instance Hom.toSubtype_ne [OFE α] [OFE β] : NonExpansive (Hom.toSubtype (α :=
 
 @[rocq_alias sigT_ofe_mixin]
 instance instOFESigma (P : α → Type _) [∀ x, OFE (P x)] : OFE (Sigma P) where
-  Equiv x y := ∀ n, ∃ heq : x.fst = y.fst, heq ▸ x.snd ≡{n}≡ y.snd
-  Dist n x y := ∃ heq : x.fst = y.fst, heq ▸ x.snd ≡{n}≡ y.snd
+  dist n x y := ∃ heq : x.fst = y.fst, heq ▸ x.snd ≡{n}≡ y.snd
   dist_eqv := {
     refl _ := ⟨rfl, .rfl⟩
     symm {x y} := match x, y with
@@ -841,7 +940,12 @@ instance instOFESigma (P : α → Type _) [∀ x, OFE (P x)] : OFE (Sigma P) whe
         | ⟨heq, H⟩, ⟨heq', H'⟩ =>
           ⟨heq.trans heq', by simp only at heq heq'; subst heq; subst heq'; exact H.trans H'⟩
   }
-  equiv_dist := ⟨id, id⟩
+  eq_dist' {x y} := by
+    refine ⟨fun h n => h ▸ ⟨rfl, .rfl⟩, fun h => ?_⟩
+    obtain ⟨heq, _⟩ := h 0
+    obtain ⟨xf, xs⟩ := x; obtain ⟨yf, ys⟩ := y
+    simp only at heq; subst heq
+    exact congrArg _ (eq_dist.mpr fun n => (h n).2)
   dist_lt {_ x y} := match x, y with
     | ⟨x, xH⟩, ⟨y, yH⟩ => fun
       | ⟨heq, H⟩ => fun hlt => ⟨heq, by simp only at heq; subst heq; exact dist_lt H hlt⟩
@@ -850,25 +954,41 @@ instance instOFESigma (P : α → Type _) [∀ x, OFE (P x)] : OFE (Sigma P) whe
 #rocq_ignore sigT_equiv "Local Equiv instance; folded into Lean's OFE (Sigma P) instance."
 
 @[rocq_alias sigT_discrete]
-instance instDiscreteESigma {P : α → Type _} [∀ x, OFE (P x)] {x : Sigma P} [inst : DiscreteE x.snd] :
+instance instDiscreteESigma {P : α → Type _} [∀ x, OFE (P x)] {x : Sigma P} [DiscreteE x.snd] :
     DiscreteE x where
   discrete {y} := by
-    rcases x, y with ⟨⟨x, xH⟩, ⟨y, yH⟩⟩; rintro ⟨heq, H⟩ n
+    rcases x, y with ⟨⟨x, xH⟩, ⟨y, yH⟩⟩; rintro ⟨heq, H⟩
     simp only at heq; subst heq
-    exact ⟨rfl, (inst.discrete H).dist⟩
+    exact congrArg _ (DiscreteE.discrete H)
 
 @[rocq_alias sigT_ofe_discrete]
 instance instDiscreteSigma {P : α → Type _} [∀ x, OFE (P x)] [∀ x, Discrete (P x)] :
     Discrete (Sigma P) where
   discrete_0 {x y} H := match x, y, H with
-    | ⟨x, xH⟩, ⟨y, yH⟩, ⟨heq, H⟩ => fun _ => ⟨heq, by simp only at heq; subst heq; exact (discrete_0 H).dist⟩
+    | ⟨x, xH⟩, ⟨y, yH⟩, ⟨heq, H⟩ => by simp only at heq; subst heq; exact congrArg _ (discrete_0 H)
 
 @[rocq_alias sigT_equiv_eq_alt]
-theorem Sigma.equiv_eq_alt {P : α → Type _} [∀ x, OFE (P x)] {x1 x2 : Sigma P} :
-    x1 ≡ x2 ↔ ∃ heq : x1.fst = x2.fst, heq ▸ x1.snd ≡ x2.snd := by
-  refine ⟨fun h => ?_, fun ⟨heq, h⟩ n => ⟨heq, equiv_dist.1 h n⟩⟩
-  obtain ⟨heq, _⟩ := h 0
-  exact ⟨heq, equiv_dist.2 fun n => (proof_irrel _ heq) ▸ (h n).2⟩
+theorem Sigma.equiv_eq_alt {P : α → Type _} {x1 x2 : Sigma P} :
+    x1 = x2 ↔ ∃ heq : x1.fst = x2.fst, heq ▸ x1.snd = x2.snd := by
+  refine ⟨fun h => h ▸ ⟨rfl, rfl⟩, fun ⟨heq, h⟩ => ?_⟩
+  obtain ⟨x1f, x1s⟩ := x1; obtain ⟨x2f, x2s⟩ := x2
+  simp only at heq; subst heq; simp only at h; subst h; rfl
+
+@[rocq_alias sigT_equiv_eq]
+theorem Sigma.equiv_eq {P : α → Type _} [∀ x, OFE (P x)] {x1 x2 : Sigma P} :
+    x1 = x2 ↔ ∀ n, x1 ≡{n}≡ x2 := eq_dist
+
+@[rocq_alias sigT_dist_eq]
+theorem Sigma.dist_eq {P : α → Type _} [∀ x, OFE (P x)] {n} {x1 x2 : Sigma P} :
+    (x1 ≡{n}≡ x2) ↔ ∃ heq : x1.fst = x2.fst, heq ▸ x1.snd ≡{n}≡ x2.snd := Iff.rfl
+
+@[rocq_alias sigT_dist_proj1]
+theorem Sigma.dist_proj1 {P : α → Type _} [∀ x, OFE (P x)] {n} {x y : Sigma P}
+    (h : x ≡{n}≡ y) : x.fst = y.fst := h.1
+
+@[rocq_alias sigT_equiv_proj1]
+theorem Sigma.equiv_proj1 {P : α → Type _} {x y : Sigma P}
+    (h : x = y) : x.fst = y.fst := congrArg Sigma.fst h
 
 @[rocq_alias projT1_ne]
 instance Sigma.fst_ne {P : α → Type _} [OFE α] [∀ x, OFE (P x)] :
@@ -876,14 +996,22 @@ instance Sigma.fst_ne {P : α → Type _} [OFE α] [∀ x, OFE (P x)] :
   ne {_ _ _} h := Dist.of_eq h.1
 #rocq_ignore projT1_proper "Derived from nonexpansivity."
 
+/-- The first components of `n`-equivalent dependent pairs are equal.
+
+Split out of `Sigma.dist_snd` so that the projection happens in a body rather than in a statement:
+in a statement the `OFE (Sigma P)` instance argument is still an unsolved metavariable, so `h`'s
+type cannot be reduced to the `∃ heq, ..` of `instOFESigma` to project out of. -/
+theorem Sigma.dist_fst {P : α → Type _} [∀ x, OFE (P x)] {n} {x y : Sigma P}
+    (h : x ≡{n}≡ y) : x.fst = y.fst := h.1
+
 @[rocq_alias projT2_ne]
 theorem Sigma.dist_snd {P : α → Type _} [∀ x, OFE (P x)] {n} {x y : Sigma P}
-    (h : x ≡{n}≡ y) : h.1 ▸ x.snd ≡{n}≡ y.snd := h.2
+    (h : x ≡{n}≡ y) : Sigma.dist_fst h ▸ x.snd ≡{n}≡ y.snd := h.2
 
 @[rocq_alias projT2_proper]
-theorem Sigma.equiv_snd {P : α → Type _} [∀ x, OFE (P x)] {x y : Sigma P}
-    (h : x ≡ y) : (h 0).1 ▸ x.snd ≡ y.snd :=
-  equiv_dist.2 fun n => (proof_irrel (h n).1 (h 0).1) ▸ (h n).2
+theorem Sigma.equiv_snd {P : α → Type _} {x y : Sigma P}
+    (h : x = y) : congrArg Sigma.fst h ▸ x.snd = y.snd := by
+  subst h; rfl
 
 @[rocq_alias existT_ne]
 theorem Sigma.mk_dist {P : α → Type _} [∀ x, OFE (P x)] {n} {i1 i2 : α} {v1 : P i1} {v2 : P i2}
@@ -891,22 +1019,23 @@ theorem Sigma.mk_dist {P : α → Type _} [∀ x, OFE (P x)] {n} {i1 i2 : α} {v
   ⟨heq, h⟩
 
 @[rocq_alias existT_proper]
-theorem Sigma.mk_equiv {P : α → Type _} [∀ x, OFE (P x)] {i1 i2 : α} {v1 : P i1} {v2 : P i2}
-    (heq : i1 = i2) (h : heq ▸ v1 ≡ v2) : Sigma.mk i1 v1 ≡ Sigma.mk i2 v2 :=
-  fun n => ⟨heq, equiv_dist.1 h n⟩
+theorem Sigma.mk_equiv {P : α → Type _} {i1 i2 : α} {v1 : P i1} {v2 : P i2}
+    (heq : i1 = i2) (h : heq ▸ v1 = v2) : Sigma.mk i1 v1 = Sigma.mk i2 v2 := by
+  subst heq; subst h; rfl
 
 @[rocq_alias existT_ne_2]
 instance Sigma.mk_ne {P : α → Type _} [∀ x, OFE (P x)] (a : α) :
     NonExpansive (Sigma.mk a : P a → Sigma P) where
   ne {_ _ _} h := ⟨rfl, h⟩
+#rocq_ignore existT_proper_2 "Derived from nonexpansivity (`existT_ne_2`); Leibniz."
 
 /-- An isomorphism between two OFEs is a pair of morphisms whose composition is equivalent to the
 identity morphism. -/
 @[ext, rocq_alias ofe_iso] structure Iso (α β : Type _) [OFE α] [OFE β] where
   hom : α -n> β
   inv : β -n> α
-  hom_inv : hom (inv x) ≡ x
-  inv_hom : inv (hom x) ≡ x
+  hom_inv : hom (inv x) = x
+  inv_hom : inv (hom x) = x
 #rocq_ignore ofe_isoO "Use Iso"
 #rocq_ignore ofe_iso_1_ne "Implicit from the type of `Iso.Hom`"
 #rocq_ignore ofe_iso_2_ne "Implicit from the type of `Iso.Inv`"
@@ -919,23 +1048,23 @@ instance [OFE α] [OFE β] (iso : Iso α β) : NonExpansive iso.inv := iso.inv.n
 
 @[simp] theorem Iso.hom_inv_dist [OFE α] [OFE β] (iso : Iso α β) {n} {x} :
     iso.hom (iso.inv x) ≡{n}≡ x :=
-  OFE.equiv_dist.mp (Iso.hom_inv iso) _
+  (Iso.hom_inv iso).dist
 
 @[simp] theorem Iso.inv_hom_dist [OFE α] [OFE β] (iso : Iso α β) {n} {x} :
     iso.inv (iso.hom x) ≡{n}≡ x :=
-  OFE.equiv_dist.mp (Iso.inv_hom iso) _
+  (Iso.inv_hom iso).dist
 
 /-- OFE isomorphisms preserve equivalence. -/
 theorem Iso.hom_eqv [OFE α] [OFE β] (iso : Iso α β) ⦃x y⦄ :
-    x ≡ y ↔ iso.hom x ≡ iso.hom y :=
-  ⟨fun h => NonExpansive.eqv h,
-  fun h => Equiv.trans (Equiv.symm iso.inv_hom) <| Equiv.trans (NonExpansive.eqv h) (iso.inv_hom)⟩
+    x = y ↔ iso.hom x = iso.hom y :=
+  ⟨fun h => h ▸ rfl,
+   fun h => iso.inv_hom.symm.trans ((congrArg iso.inv h).trans iso.inv_hom)⟩
 
 /-- The inverse of an OFE isomorphism preserves equivalence. -/
 theorem Iso.inv_eqv [OFE α] [OFE β] (iso : Iso α β) ⦃x y⦄ :
-    x ≡ y ↔ iso.inv x ≡ iso.inv y :=
-  ⟨fun h => NonExpansive.eqv h,
-  fun h => Equiv.trans (Equiv.symm iso.hom_inv) <| Equiv.trans (NonExpansive.eqv h) (iso.hom_inv)⟩
+    x = y ↔ iso.inv x = iso.inv y :=
+  ⟨fun h => h ▸ rfl,
+   fun h => iso.hom_inv.symm.trans ((congrArg iso.hom h).trans iso.hom_inv)⟩
 
 /-- OFE isomorphisms preserve `n`-equivalence. -/
 theorem Iso.hom_dist [OFE α] [OFE β] (iso : Iso α β) {n} ⦃x y⦄ :
@@ -974,22 +1103,18 @@ def Iso.symm [OFE α] [OFE β] (iso : Iso α β) : Iso β α where
 def Iso.comp [OFE α] [OFE β] [OFE γ] (iso1 : Iso β γ) (iso2 : Iso α β) : Iso α γ where
   hom := iso1.hom.comp iso2.hom
   inv := iso2.inv.comp iso1.inv
-  hom_inv := by
-    intro x; simp
-    exact .trans (NonExpansive.eqv <| .trans iso2.hom_inv .rfl) iso1.hom_inv
-  inv_hom := by
-    intro x; simp
-    exact .trans (NonExpansive.eqv <| .trans iso1.inv_hom .rfl) iso2.inv_hom
+  hom_inv := by intro x; simp
+  inv_hom := by intro x; simp
 
 end OFE
 
 /-- A chain in an OFE is a `Nat`-indexed sequence of elements that is upward-closed in terms of
 `n`-equivalence. -/
 @[rocq_alias chain] structure Chain (α : Type _) [OFE α] where
-  chain : Nat → α
-  cauchy : n ≤ i → chain i ≡{n}≡ chain n
+  chain : SI → α
+  cauchy {n i} : n ≤ i → chain i ≡{n}≡ chain n
 
-instance [OFE α] : CoeFun (Chain α) (fun _ => Nat → α) := ⟨Chain.chain⟩
+instance [OFE α] : CoeFun (Chain α) (fun _ => SI → α) := ⟨Chain.chain⟩
 
 namespace Chain
 
@@ -1017,21 +1142,19 @@ theorem map_comp [OFE α] [OFE β] [OFE γ] {f : α -n> β} {g : β -n> γ} {c :
     map (g.comp f) c = map g (map f c) := by
   simp [map]
 
-end Chain
-
 /-- If a chain of Option is ever none, is the constant none chain. -/
 theorem chain_none_const [OFE V] {c : Chain (Option V)} (H : c n = none) :
     c = Chain.const none := by
   rcases c with ⟨c, Hc⟩
   congr 1; refine funext (fun k => ?_)
-  rcases Nat.le_or_ge n k with (Hnk|Hnk)
+  rcases (SIdx.le_total : n ≤ k ∨ k ≤ n) with (Hnk|Hnk)
   · suffices c k ≡{n}≡ c n by cases _ : c k <;> simp_all
     exact Hc Hnk
   · suffices c k ≡{k}≡ c n by cases _ : c k <;> simp_all
     exact (Hc Hnk).symm
 
 /-- If a chain of Option is ever some, it is the lift a chain by some. -/
-def chain_option_some [OFE V] {c : Chain (Option V)} (H : c n = some v) :
+theorem chain_option_some [OFE V] {c : Chain (Option V)} (H : c n = some v) :
     ∃ c' : Chain V, c = Chain.map ⟨some, OFE.Option.some.ne⟩ c' := by
   have HVc (k) : ∃ v', c k = some v' := by
     rcases h : c.chain k with (_|v')
@@ -1053,14 +1176,60 @@ def chain_option_some [OFE V] {c : Chain (Option V)} (H : c n = some v) :
   rw [← Hchoose]
   simp [hcc]
 
-/-- Complete ordered family of equivalences -/
-@[rocq_alias Cofe]
-class IsCOFE (α : Type _) [OFE α] where
-  compl : Chain α → α
-  conv_compl {c : Chain α} : compl c ≡{n}≡ c n
+end Chain
+
+@[rocq_alias bchain]
+structure BChain (α : Type _) [OFE α] (n : SI) where
+  bchain m : m < n → α
+  bcauchy {m} {p} (hm : m < n) (hp : p < n) (h : m ≤ p) : bchain p hp ≡{m}≡ bchain m hm
+
+namespace BChain
+variable [OFE α] [OFE β]
+
+@[rocq_alias bchain_map]
+def map (f : α -n> β) {n} (c : BChain α n) : BChain β n where
+  bchain m hm := f <| c.bchain m hm
+  bcauchy hm hp h := f.ne.ne <| c.bcauchy hm hp h
+
+@[rocq_alias bchain_const]
+def const (a : α) (n) : BChain α n where
+  bchain _ _ := a
+  bcauchy _ _ _ := .rfl
+
+@[rocq_alias bchain_le]
+def le {n} (c : BChain α n) {m} (hm : m ≤ n) : BChain α m where
+  bchain m' hm' := c.bchain m' (SIdx.lt_le_trans hm' hm)
+  bcauchy _ _ h := c.bcauchy _ _ h
+
+@[simp] theorem map_apply {f : α -n> β} {n} {c : BChain α n} {m} {hm : m < n} :
+    (map f c).bchain m hm = f (c.bchain m hm) := rfl
+
+@[simp] theorem const_apply {a : α} {n m} {hm : m < n} :
+    (const a n).bchain m hm = a := rfl
+
+end BChain
 
 /-- Complete ordered family of equivalences -/
+@[indexed SI, rocq_alias Cofe]
+class IsCOFE {SI : Type _} (α : Type _) [SIdx SI] [OFE α] where
+  compl : Chain α → α
+  conv_compl {c : Chain α} : compl c ≡{n}≡ c n
+  lbcompl {n} : SIdx.Limit n → BChain α n → α
+  conv_lbcompl {n} (Hn : SIdx.Limit n) (c : BChain α n) {m} (hm : m < n) :
+    lbcompl Hn c ≡{m}≡ c.bchain m hm
+  lbcompl_ne {n} (hn : SIdx.Limit n) (c1 c2 : BChain α n) {m} :
+    (∀ p (Hp : p < n), c1.bchain p Hp ≡{m}≡ c2.bchain p Hp) →
+    lbcompl hn c1 ≡{m}≡ lbcompl hn c2
+
+variable (SI) in
+abbrev IsCOFEᵢ (α : Type _) [OFE α] := IsCOFE α
+
+/-- Complete ordered family of equivalences -/
+@[indexed SI]
 class abbrev COFE (α : Type _) := OFE α, IsCOFE α
+
+variable (SI) in
+abbrev COFEᵢ (α : Type _) := COFE α
 
 namespace COFE
 export IsCOFE (compl conv_compl)
@@ -1072,62 +1241,73 @@ theorem conv_compl' [COFE α] {c : Chain α} {n i} (h : n ≤ i) : compl c ≡{n
 /-- Chain maps commute with completion. -/
 @[rocq_alias compl_chain_map]
 theorem compl_map [COFE α] [COFE β] (f : α -n> β) (c : Chain α) :
-    compl (Chain.map f c) ≡ f (compl c) := by
-  refine OFE.equiv_dist.mpr (fun n => ?_)
-  exact Dist.trans conv_compl (NonExpansive.ne (Dist.symm conv_compl))
+    compl (Chain.map f c) = f (compl c) := by
+  refine eq_dist.mpr (fun n => ?_)
+  exact conv_compl.trans (NonExpansive.ne (Dist.symm conv_compl))
 
 /-- Constant chains complete to their constant value -/
 @[simp, rocq_alias compl_chain_const]
-theorem compl_const [COFE α] (a : α) : compl (Chain.const a) ≡ a :=
-  OFE.equiv_dist.mpr (fun _ => conv_compl)
+theorem compl_const [COFE α] (a : α) : compl (Chain.const a) = a :=
+  eq_dist.mpr (fun _ => conv_compl)
 
 /-- Completion of discrete COFEs is the constant value. -/
-@[simp] theorem discrete_cofe_compl [COFE α] [OFE.Discrete α] (c : Chain α) : compl c ≡ c 0 :=
+@[simp] theorem discrete_cofe_compl [COFE α] [OFE.Discrete α] (c : Chain α) : compl c = c 0 :=
   Discrete.discrete_0 conv_compl
 
-/-- The discrete COFE obtained from an equivalence relation `Equiv` -/
+/-- The discrete COFE obtained from an equality relation `Eq` -/
 @[reducible, rocq_alias discrete_cofe]
-def ofDiscrete (Equiv : α → α → Prop) (equiv_eqv : Equivalence Equiv) : COFE α :=
-  let _ := OFE.ofDiscrete Equiv equiv_eqv
-  { compl := fun c => c 0
-    conv_compl := fun {_ c} => equiv_eqv.2 (c.cauchy (Nat.zero_le _)) }
+def ofDiscrete (α : Type _) : COFE α :=
+  letI : OFE α := OFE.ofDiscrete α
+  {
+    compl c := c 0
+    conv_compl {_ c} := (c.cauchy SIdx.le_0_l).symm
+    lbcompl hn c := c.bchain 0 hn.limit_lt_0
+    conv_lbcompl hn c _ hm := (c.bcauchy hn.limit_lt_0 hm SIdx.le_0_l).symm
+    lbcompl_ne hn _ _ _ hc := hc 0 hn.limit_lt_0
+  }
 
 instance [COFE α] : COFE (ULift α) where
   compl c := ⟨compl (c.map uliftDownHom)⟩
   conv_compl := conv_compl
+  lbcompl hn c := ⟨IsCOFE.lbcompl hn (c.map uliftDownHom)⟩
+  conv_lbcompl hn c _ hm:= IsCOFE.conv_lbcompl hn (c.map uliftDownHom) hm
+  lbcompl_ne hn _ _ _ hc := IsCOFE.lbcompl_ne hn _ _ (fun p hp => hc p hp)
 
 @[rocq_alias unit_ofe_discrete]
 instance : Discrete Unit where
-  discrete_0 _ := .rfl
+  discrete_0 _ := Subsingleton.elim _ _
 
 @[rocq_alias unit_cofe]
 instance : COFE Unit where
   compl _ := ()
   conv_compl := ⟨⟩
+  lbcompl _ _ := ()
+  conv_lbcompl _ _ _ _ := ⟨⟩
+  lbcompl_ne _ _ _ _ _ := ⟨⟩
+
+@[rocq_alias Empty_set_ofe_discrete]
+instance : Discrete Empty where
+  discrete_0 {x} _ := x.elim
+
+@[rocq_alias Empty_set_cofe]
+instance : COFE Empty where
+  compl c := (c 0).elim
+  conv_compl {_ c} := (c 0).elim
+  lbcompl hn c := (c.bchain 0 hn.limit_lt_0).elim
+  conv_lbcompl hn c := (c.bchain 0 hn.limit_lt_0).elim
+  lbcompl_ne hn c := (c.bchain 0 hn.limit_lt_0).elim
 
 abbrev IsCOFEFun {α : Type _} (β : α → Type _) [OFEFun β] := ∀ x : α, IsCOFE (β x)
 
-instance instIsCOFEOption [OFE α] [IsCOFE α] : IsCOFE (Option α) where
-  compl c := match c 0 with
-    | .some seed => .some <| compl <| c.map ⟨_, Option.ne_match id inferInstance seed⟩
-    | .none => none
-  conv_compl {n c} := by
-    cases h1 : c.chain 0 with
-    | none =>
-      refine Equiv.dist <| Option.none_is_discrete.discrete ?_
-      exact h1 ▸ c.cauchy (Nat.zero_le n) |>.symm
-    | some seed =>
-      refine (some_dist_some.mpr conv_compl).trans ?_
-      dsimp only [Chain.map_apply]
-      cases h2 : c.chain n with
-      | none => exact (h1 ▸ h2 ▸ c.cauchy (by omega : 0 ≤ n)).elim
-      | some _ => rfl
 #rocq_ignore option_compl "Local Compl definition; folded into Lean's IsCOFE instance."
 
 @[rocq_alias discrete_fun_cofe]
 instance {α : Type _} (β : α → Type _) [∀ x, COFE (β x)] : COFE ((x : α) → β x) where
   compl c x := compl (c.map (applyHom x))
   conv_compl _ := IsCOFE.conv_compl
+  lbcompl hn c x := IsCOFE.lbcompl hn (c.map (applyHom x))
+  conv_lbcompl hn _ _ hm _ := IsCOFE.conv_lbcompl hn _ hm
+  lbcompl_ne hn _ _ _ hc x := IsCOFE.lbcompl_ne hn _ _ (fun p hp => hc p hp x)
 #rocq_ignore discrete_fun_chain "Local helper; folded into Lean's IsCOFE instance."
 
 @[rocq_alias ofe_mor_cofe]
@@ -1137,113 +1317,278 @@ instance instIsCOFEHom [OFE α] [OFE β] [IsCOFE β] : IsCOFE (α -n> β) where
     refine conv_compl.trans (.trans ?_ conv_compl.symm)
     exact NonExpansive.ne (f := c.chain n) H
   conv_compl _ := IsCOFE.conv_compl
+  lbcompl {n} hn c := by
+    refine ⟨fun x => IsCOFE.lbcompl hn (c.map (applyNe x)), ⟨fun m x y H => ?_⟩⟩
+    exact IsCOFE.lbcompl_ne hn _ _ (fun p hp => (c.bchain p hp).ne.ne H)
+  conv_lbcompl hn c _ hm := fun _ => IsCOFE.conv_lbcompl hn _ hm
+  lbcompl_ne hn c1 c2 _ hc := fun x => IsCOFE.lbcompl_ne hn _ _ (fun p hp => hc p hp x)
 #rocq_ignore ofe_mor_compl "Inlined in IsCOFE instance"
 
 @[rocq_alias prod_cofe]
 instance instIsCOFEProd [OFE α] [OFE β] [IsCOFE α] [IsCOFE β] : IsCOFE (α × β) where
   compl c := ⟨compl (c.map ⟨Prod.fst, inferInstance⟩), compl (c.map ⟨Prod.snd, inferInstance⟩)⟩
   conv_compl := ⟨conv_compl, conv_compl⟩
+  lbcompl hn c :=
+    (IsCOFE.lbcompl hn (c.map ⟨Prod.fst, inferInstance⟩),
+     IsCOFE.lbcompl hn (c.map ⟨Prod.snd, inferInstance⟩))
+  conv_lbcompl hn _ _ hm := ⟨IsCOFE.conv_lbcompl hn _ hm, IsCOFE.conv_lbcompl hn _ hm⟩
+  lbcompl_ne hn _ _ _ hc :=
+    ⟨IsCOFE.lbcompl_ne hn _ _ (fun p hp => (hc p hp).left),
+     IsCOFE.lbcompl_ne hn _ _ (fun p hp => (hc p hp).right)⟩
+
+private theorem elim_const_dist_left [OFE α] [OFE β] {x y : α ⊕ β} {s₁ s₂ : α}
+    (h : x ≡{n}≡ y) (hs : s₁ ≡{n}≡ s₂) :
+    Sum.elim id (Function.const _ s₁) x ≡{n}≡ Sum.elim id (Function.const _ s₂) y :=
+  match x, y with
+  | .inl _, .inl _ => h
+  | .inr _, .inr _ => hs
+  | .inl _, .inr _ | .inr _, .inl _ => h.elim
+
+private theorem elim_const_dist_right [OFE α] [OFE β] {x y : α ⊕ β} {s₁ s₂ : β}
+    (h : x ≡{n}≡ y) (hs : s₁ ≡{n}≡ s₂) :
+    Sum.elim (Function.const _ s₁) id x ≡{n}≡ Sum.elim (Function.const _ s₂) id y :=
+  match x, y with
+  | .inl _, .inl _ => hs
+  | .inr _, .inr _ => h
+  | .inl _, .inr _ | .inr _, .inl _ => h.elim
+
+theorem IsCOFE.conv_compl_map [OFE α] [OFE β] [IsCOFE β] {c : Chain α} {f : α -n> β} {n} :
+    compl (c.map f) ≡{n}≡ f.f (c n) := conv_compl
+grind_pattern IsCOFE.conv_compl_map => compl (c.map f), c.chain n
+
+theorem IsCOFE.conv_lbcompl_map [OFE α] [OFE β] [IsCOFE β] {n} {hn : SIdx.Limit n} {c : BChain α n}
+    {f : α -n> β} {m} {hm : m < n} : IsCOFE.lbcompl hn (c.map f) ≡{m}≡ f.f (c.bchain m hm) :=
+  IsCOFE.conv_lbcompl hn _ hm
+grind_pattern IsCOFE.conv_lbcompl_map => IsCOFE.lbcompl hn (c.map f), c.bchain m hm
+
+theorem Chain.dist_zero [OFE α] (c : Chain α) (n) : c n ≡{0}≡ c 0 := c.cauchy SIdx.le_0_l
+grind_pattern Chain.dist_zero => c.chain n
+
+theorem BChain.dist_zero [OFE α] {n} (hn : 0 < n) (c : BChain α n) {m} (hm : m < n) :
+    c.bchain m hm ≡{0}≡ c.bchain 0 hn := c.bcauchy hn hm SIdx.le_0_l
+grind_pattern BChain.dist_zero => c.bchain m hm, c.bchain 0 hn
 
 @[rocq_alias sum_cofe]
-instance instIsCOFESum  [OFE α] [OFE β] [IsCOFE α] [IsCOFE β] : IsCOFE (α ⊕ β) where
+instance instIsCOFESum [OFE α] [OFE β] [IsCOFE α] [IsCOFE β] : IsCOFE (α ⊕ β) where
   compl c := match c 0 with
     | .inl seed => .inl (compl (c.map ⟨Sum.elim id (Function.const _ seed), inferInstance⟩))
     | .inr seed => .inr (compl (c.map ⟨Sum.elim (Function.const _ seed) id, inferInstance⟩))
-  conv_compl {n c} := by
-    cases h1 : c.chain 0 with
-    | inl seed =>
-      refine (dist_inl conv_compl).trans ?_
-      dsimp only [Chain.map_apply]
-      cases h2 : c.chain n with
-      | inl _ => simp
-      | inr _ => exact (h1 ▸ h2 ▸ c.cauchy (by omega : 0 ≤ n)).elim
-    | inr seed =>
-      refine (dist_inr conv_compl).trans ?_
-      dsimp only [Chain.map_apply]
-      cases h2 : c.chain n with
-      | inl _ => exact (h1 ▸ h2 ▸ c.cauchy (by omega : 0 ≤ n)).elim
-      | inr _ => simp
+  conv_compl {n c} := by cases h : c.chain n <;> grind
+  lbcompl {n} hn c :=
+    match c.bchain 0 hn.limit_lt_0 with
+    | .inl seed =>
+      .inl (IsCOFE.lbcompl hn (c.map ⟨Sum.elim id (Function.const _ seed), inferInstance⟩))
+    | .inr seed =>
+      .inr (IsCOFE.lbcompl hn (c.map ⟨Sum.elim (Function.const _ seed) id, inferInstance⟩))
+  conv_lbcompl {n} hn c {m} hm := by cases h : c.bchain m hm <;> grind
+  lbcompl_ne {n} hn c1 c2 {m} hc := by
+    have h0 := hc 0 hn.limit_lt_0
+    cases h1 : c1.bchain 0 hn.limit_lt_0 <;> cases h2 : c2.bchain 0 hn.limit_lt_0
+    · exact dist_inl <| IsCOFE.lbcompl_ne hn _ _ fun p hp =>
+        elim_const_dist_left (hc p hp) (dist_ext_left (h1 ▸ h2 ▸ h0))
+    · exact (h1 ▸ h2 ▸ h0).elim
+    · exact (h1 ▸ h2 ▸ h0).elim
+    · exact dist_inr <| IsCOFE.lbcompl_ne hn _ _ fun p hp =>
+        elim_const_dist_right (hc p hp) (dist_ext_right (h1 ▸ h2 ▸ h0))
+
 #rocq_ignore inl_chain "Local helper for `sum_compl`; folded into Lean's IsCOFE instance."
 #rocq_ignore inr_chain "Local helper for `sum_compl`; folded into Lean's IsCOFE instance."
 #rocq_ignore sum_compl "Local Compl definition; folded into Lean's IsCOFE instance."
 
 @[rocq_alias sigT_chain_const_proj1]
-theorem Sigma.chain_const_proj1 {P : α → Type _} [∀ x, OFE (P x)] [∀ x, IsCOFE (P x)]
-  (c : Chain (Sigma P)) n : (c n).fst = (c 0).fst := (c.cauchy (by omega : 0 ≤ n)).choose
+theorem Sigma.chain_const_proj1 {P : α → Type _} [∀ x, OFE (P x)]
+    (c : Chain (Sigma P)) n : (c n).fst = (c 0).fst :=
+  (c.cauchy SIdx.le_0_l).choose
+
+@[rocq_alias sigT_bchain_const_proj1]
+theorem Sigma.bchain_const_proj1 {P : α → Type _} [∀ x, OFE (P x)]
+    {n} (hn : SIdx.Limit n) (c : BChain (Sigma P) n) {m} (hm : m < n) :
+    (c.bchain m hm).fst = (c.bchain 0 hn.limit_lt_0).fst :=
+  (c.bcauchy hn.limit_lt_0 hm SIdx.le_0_l).choose
+
+theorem Sigma.dist_cast_of_dist {P : α → Type _} [∀ x, OFE (P x)] {n}
+    {x y : Sigma P} (h : x ≡{n}≡ y) {b : α} (hx : x.fst = b) (hy : y.fst = b) :
+    (hx ▸ x.snd : P b) ≡{n}≡ (hy ▸ y.snd : P b) := by
+  obtain ⟨h1, h2⟩ := h
+  obtain ⟨x1, x2⟩ := x
+  obtain ⟨y1, y2⟩ := y
+  simp only at h1 hx
+  subst h1; subst hx
+  exact h2
+
+theorem Sigma.mk_dist_of_dist_cast {P : α → Type _} [∀ x, OFE (P x)] {n} {x : Sigma P}
+    {b : α} {hx : x.fst = b} {v : P b} (h : v ≡{n}≡ (hx ▸ x.snd : P b)) :
+    (⟨b, v⟩ : Sigma P) ≡{n}≡ x := by
+  cases x; subst hx; exact ⟨rfl, h⟩
+
+@[rocq_alias bchain_map_snd]
+def Sigma.bchain_map_snd {P : α → Type _} [∀ x, OFE (P x)]
+    {n} (hn : SIdx.Limit n) (c : BChain (Sigma P) n) :
+    BChain (P (c.bchain 0 hn.limit_lt_0).fst) n where
+  bchain m hm := Sigma.bchain_const_proj1 hn c hm ▸ (c.bchain m hm).snd
+  bcauchy _ hp hle :=
+    Sigma.dist_cast_of_dist (c.bcauchy _ hp hle)
+      (Sigma.bchain_const_proj1 hn c hp) (Sigma.bchain_const_proj1 hn c _)
+
+theorem Sigma.lbcompl_cast {P : α → Type _} [∀ x, OFE (P x)] [∀ x, IsCOFE (P x)]
+    {a b : α} (eq : a = b) {n} (hn : SIdx.Limit n) (c : BChain (P a) n) :
+    (eq ▸ IsCOFE.lbcompl hn c : P b)
+      = IsCOFE.lbcompl hn (eq ▸ c : BChain (P b) n) := by
+  subst eq; rfl
+
+theorem Sigma.bchain_cast_apply {P : α → Type _} [∀ x, OFE (P x)] {a b : α} (eq : a = b)
+    {n} (c : BChain (P a) n) {p} (hp : p < n) :
+    (eq ▸ c : BChain (P b) n).bchain p hp = eq ▸ c.bchain p hp := by
+  subst eq; rfl
+
+theorem Sigma.cast_cast {P : α → Type _} {a b c : α} (h1 : a = b) (h2 : b = c) (x : P a) :
+    (h2 ▸ (h1 ▸ x : P b) : P c) = (h1.trans h2) ▸ x := by
+  subst h1; subst h2; rfl
 
 @[rocq_alias chain_map_snd]
-def Sigma.chain_map_snd {P : α → Type _} [∀ x, OFE (P x)] [∀ x, IsCOFE (P x)] (c : Chain (Sigma P)) :
+def Sigma.chain_map_snd {P : α → Type _} [∀ x, OFE (P x)] (c : Chain (Sigma P)) :
     Chain (P (c 0).fst) where
   chain n := Sigma.chain_const_proj1 c n ▸ (c n).snd
-  cauchy {n i} hle := by
-    obtain ⟨heq, hequiv⟩ := c.cauchy hle
-    clear hle
-    rw [show Sigma.chain_const_proj1 c i = heq.trans (Sigma.chain_const_proj1 c n) by rfl]
-    generalize Sigma.chain_const_proj1 c n = heq'
-    revert heq' hequiv heq; cases c.chain i; cases c.chain n
-    rintro ⟨⟩ hequiv ⟨⟩
-    exact hequiv
+  cauchy {n} {i} hle :=
+    Sigma.dist_cast_of_dist (c.cauchy hle)
+      (Sigma.chain_const_proj1 c i) (Sigma.chain_const_proj1 c n)
 
 @[rocq_alias sigT_cofe]
 instance {P : α → Type _} [∀ x, OFE (P x)] [∀ x, IsCOFE (P x)] : IsCOFE (Sigma P) where
   compl c := ⟨(c 0).fst, compl (Sigma.chain_map_snd c)⟩
-  conv_compl {n c} := by
-    refine ⟨(Sigma.chain_const_proj1 c n).symm, ?_⟩
-    have hequiv := conv_compl (c := Sigma.chain_map_snd c) (n := n)
-    revert hequiv
-    dsimp only [Sigma.chain_map_snd]
-    generalize Sigma.chain_const_proj1 c n = heq
-    revert heq; cases c.chain n
-    rintro ⟨⟩ hequiv
-    exact hequiv
+  conv_compl {n} {c} :=
+    Sigma.mk_dist_of_dist_cast (conv_compl (c := Sigma.chain_map_snd c) (n := n))
+  lbcompl {n} hn c :=
+    ⟨(c.bchain 0 hn.limit_lt_0).fst, IsCOFE.lbcompl hn (Sigma.bchain_map_snd hn c)⟩
+  conv_lbcompl hn c _ hm :=
+    Sigma.mk_dist_of_dist_cast (IsCOFE.conv_lbcompl hn (Sigma.bchain_map_snd hn c) hm)
+  lbcompl_ne {n} hn c1 c2 {m} hc := by
+    obtain ⟨eq, -⟩ := hc 0 hn.limit_lt_0
+    refine ⟨eq, ?_⟩
+    rw [Sigma.lbcompl_cast eq hn (Sigma.bchain_map_snd hn c1)]
+    refine IsCOFE.lbcompl_ne hn _ _ (fun p hp => ?_)
+    simp only [Sigma.bchain_cast_apply, Sigma.bchain_map_snd, Sigma.cast_cast]
+    exact Sigma.dist_cast_of_dist (hc p hp) _ _
+
 #rocq_ignore sigT_compl "Local Compl definition; folded into Lean's IsCOFE instance."
 
+set_option linter.checkUnivs false in
 abbrev OFunctorPre := ∀ α β [COFE α] [COFE β], Type _
 #rocq_ignore oFunctor_apply "Definition for application of an `oFunctor`; subsumed by `OFunctorPre` in Lean."
 
-@[rocq_alias oFunctor]
+@[indexed SI, rocq_alias oFunctor]
 class OFunctor (F : OFunctorPre) where
   ofe [COFE α] [COFE β] : OFE (F α β)
   map [COFE α₁] [COFE α₂] [COFE β₁] [COFE β₂] :
     (α₂ -n> α₁) → (β₁ -n> β₂) → F α₁ β₁ -n> F α₂ β₂
   map_ne [COFE α₁] [COFE α₂] [COFE β₁] [COFE β₂] :
     NonExpansive₂ (@map α₁ α₂ β₁ β₂ _ _ _ _)
-  map_id [COFE α] [COFE β] (x : F α β) : map (@Hom.id α _) (@Hom.id β _) x ≡ x
+  map_id [COFE α] [COFE β] (x : F α β) : map (Hom.id (α := α)) (Hom.id (α := β)) x = x
   map_comp [COFE α₁] [COFE α₂] [COFE α₃] [COFE β₁] [COFE β₂] [COFE β₃]
     (f : α₂ -n> α₁) (g : α₃ -n> α₂) (f' : β₁ -n> β₂) (g' : β₂ -n> β₃) (x : F α₁ β₁) :
-    map (f.comp g) (g'.comp f') x ≡ map g g' (map f f' x)
+    map (f.comp g) (g'.comp f') x = map g g' (map f f' x)
 
-@[rocq_alias oFunctorContractive]
+variable (SI) in
+abbrev OFunctorᵢ (F : OFunctorPre) := OFunctor F
+
+@[indexed SI, rocq_alias oFunctorContractive]
 class OFunctorContractive (F : OFunctorPre) extends OFunctor F where
   map_contractive [COFE α₁] [COFE α₂] [COFE β₁] [COFE β₂] :
     Contractive (Function.uncurry (@map α₁ α₂ β₁ β₂ _ _ _ _))
+
+variable (SI) in
+abbrev OFunctorContractiveᵢ (F : OFunctorPre) := OFunctorContractive F
 
 attribute [reducible, instance] OFunctor.ofe
 
 end COFE
 
-/- Leibniz OFE structure on a type -/
-@[ext] structure LeibnizO (α : Type _) where
+/- Discrete OFE structure on a type -/
+@[ext] structure DiscreteO (α : Type _) where
   car : α
 
--- Move?
-theorem Eq_Equivalence {α : Type _} : Equivalence (@Eq α) :=
-  ⟨congrFun rfl, (Eq.symm ·), (· ▸ ·)⟩
+section DiscreteO
+instance : COFE (DiscreteO α) := COFE.ofDiscrete _
+instance {α : Type _} : OFE.Discrete (DiscreteO α) := ⟨fun h => h⟩
 
-instance : COFE (LeibnizO α) := COFE.ofDiscrete _ Eq_Equivalence
+#rocq_ignore leibnizO_leibniz "Not needed"
 
-instance : Leibniz (LeibnizO α) := ⟨(·)⟩
+theorem DiscreteO.eqv_inj {x y : α} (H : DiscreteO.mk x = DiscreteO.mk y) : x = y :=
+  congrArg DiscreteO.car H
 
-instance {α : Type _} : OFE.Discrete (LeibnizO α) := ⟨congrArg id⟩
+theorem DiscreteO.dist_inj {x y : α} {n} (H : DiscreteO.mk x ≡{n}≡ DiscreteO.mk y) : x = y :=
+  DiscreteO.eqv_inj <| discrete H
 
-@[rocq_alias leibnizO_leibniz]
-instance {α : Type _} : OFE.Leibniz (LeibnizO α) := ⟨congrArg id⟩
+end DiscreteO
 
-theorem LeibnizO.eqv_inj {x y : α} (H : LeibnizO.mk x ≡ LeibnizO.mk y) : x = y :=
-  show (LeibnizO.mk x).car = (LeibnizO.mk y).car from H ▸ rfl
+section ComposeOF
+open COFE
 
-theorem LeibnizO.dist_inj {x y : α} {n} (H : LeibnizO.mk x ≡{n}≡ LeibnizO.mk y) : x = y :=
-  LeibnizO.eqv_inj <| discrete H
+/-- The composition of two functors, `F₁` applied to `F₂`. -/
+abbrev ComposeOF (F₁ F₂ : OFunctorPre) [OFunctor F₂]
+    [∀ α β, [COFE α] → [COFE β] → IsCOFE (F₂ α β)] : OFunctorPre :=
+  fun α β _ _ => F₁ (F₂ β α) (F₂ α β)
+
+theorem COFE.OFunctor.map_id_eq {F : OFunctorPre} [OFunctor F] [COFE α] [COFE β] :
+    OFunctor.map (F := F) (Hom.id (α := α)) (Hom.id (α := β)) = Hom.id :=
+  Hom.ext (funext fun y => OFunctor.map_id y)
+
+theorem COFE.OFunctor.map_comp_eq {F : OFunctorPre} [OFunctor F]
+    [COFE α₁] [COFE α₂] [COFE α₃] [COFE β₁] [COFE β₂] [COFE β₃]
+    (f : α₂ -n> α₁) (g : α₃ -n> α₂) (f' : β₁ -n> β₂) (g' : β₂ -n> β₃) :
+    OFunctor.map (F := F) (f.comp g) (g'.comp f') =
+      (OFunctor.map g g').comp (OFunctor.map f f') :=
+  Hom.ext (funext fun y => OFunctor.map_comp f g f' g' y)
+
+theorem COFE.OFunctorContractive.map_distLater {F : OFunctorPre} [OFunctorContractive F]
+    [COFE α₁] [COFE α₂] [COFE β₁] [COFE β₂] {n} {f₁ f₂ : α₂ -n> α₁} {g₁ g₂ : β₁ -n> β₂}
+    (hf : DistLater n f₁ f₂) (hg : DistLater n g₁ g₂) (x : F α₁ β₁) :
+    OFunctor.map f₁ g₁ x ≡{n}≡ OFunctor.map f₂ g₂ x :=
+  map_contractive.1 (x := (f₁, g₁)) (y := (f₂, g₂)) (fun m hm => ⟨hf m hm, hg m hm⟩) x
+
+variable {F₁ F₂ : OFunctorPre} [OFunctor F₂] [∀ α β, [COFE α] → [COFE β] → IsCOFE (F₂ α β)]
+
+open OFunctor in
+@[rocq_alias oFunctor_oFunctor_compose]
+instance oFunctor_composeOF [OFunctor F₁] : OFunctor (ComposeOF F₁ F₂) where
+  ofe := _
+  map f g := map (F := F₁) (map (F := F₂) g f) (map (F := F₂) f g)
+  map_ne.ne _ _ _ hf _ _ hg _ :=
+    (map_ne (F := F₁)).ne (fun _ => (map_ne (F := F₂)).ne hg hf _)
+      (fun _ => (map_ne (F := F₂)).ne hf hg _) _
+  map_id _ := by
+    simp only [map_id_eq]
+    rfl
+  map_comp _ _ _ _ _ := by
+    simp only [map_comp_eq]
+    rfl
+
+open OFunctor OFunctorContractive in
+@[rocq_alias oFunctor_oFunctor_compose_contractive_1]
+instance oFunctor_composeOF_contractive_left [OFunctorContractive F₁] :
+    OFunctorContractive (ComposeOF F₁ F₂) where
+  map_contractive := ⟨fun {_ _ _} h x =>
+    map_distLater (F := F₁)
+      (fun m hm _ => (map_ne (F := F₂)).ne (h m hm).2 (h m hm).1 _)
+      (fun m hm _ => (map_ne (F := F₂)).ne (h m hm).1 (h m hm).2 _) x⟩
+
+end ComposeOF
+
+section ComposeOFContractive
+open COFE OFunctor OFunctorContractive
+
+variable {F₁ F₂ : OFunctorPre} [OFunctorContractive F₂]
+  [∀ α β, [COFE α] → [COFE β] → IsCOFE (F₂ α β)]
+
+@[rocq_alias oFunctor_oFunctor_compose_contractive_2]
+instance oFunctor_composeOF_contractive_right [OFunctor F₁] :
+    OFunctorContractive (ComposeOF F₁ F₂) where
+  map_contractive := ⟨fun {_ _ _} h x =>
+    (map_ne (F := F₁)).ne
+      (fun _ => map_distLater (F := F₂) (fun m hm => (h m hm).2) (fun m hm => (h m hm).1) _)
+      (fun _ => map_distLater (F := F₂) (fun m hm => (h m hm).1) (fun m hm => (h m hm).2) _) x⟩
+
+end ComposeOFContractive
 
 section DiscreteFunOF
 open COFE
@@ -1257,8 +1602,13 @@ instance oFunctor_discreteFunOF {C} (F : C → OFunctorPre) [∀ c, OFunctor (F 
   ofe := _
   map f₁ f₂ := mapCodHom fun _ => OFunctor.map f₁ f₂
   map_ne.ne _ _ _ Hx _ _ Hy _ _ := OFunctor.map_ne.ne Hx Hy ..
-  map_id _ _ := OFunctor.map_id ..
-  map_comp _ _ _ _ _ _ := OFunctor.map_comp ..
+  map_id x := funext fun c => OFunctor.map_id (x c)
+  map_comp f g f' g' x := funext fun c => OFunctor.map_comp f g f' g' (x c)
+
+@[rocq_alias discrete_funOF_contractive]
+instance oFunctor_discreteFunOF_contractive {C} (F : C → OFunctorPre)
+    [∀ c, OFunctorContractive (F c)] : OFunctorContractive (DiscreteFunOF F) where
+  map_contractive.1 h _ _ := OFunctorContractive.map_contractive.distLater_dist h _
 
 end DiscreteFunOF
 
@@ -1267,35 +1617,68 @@ variable [OFE α]
 
 @[rocq_alias option_chain]
 def optionChain (c : Chain (Option α)) (x : α) : Chain α := by
-  refine ⟨fun n => (c n).getD x, fun {n i} H => ?_⟩
+  refine ⟨fun n => (c n).getD x, fun {n} {i} H => ?_⟩
   have := c.cauchy H; revert this
-  cases c.chain i <;> cases c.chain n <;> simp [Dist, Option.Forall₂]
+  cases c.chain i <;> cases c.chain n <;> simp [Dist]
+
+@[rocq_alias option_bchain]
+def optionBChain {n} (c : BChain (Option α) n) (x : α) : BChain α n := by
+  refine ⟨fun m hm => (c.bchain m hm).getD x, fun {m} {p} hm hp H => ?_⟩
+  have := c.bcauchy hm hp H; revert this
+  cases c.bchain p hp <;> cases c.bchain m hm <;> simp [Dist]
 
 @[rocq_alias option_cofe]
 instance isCOFE_option [IsCOFE α] : IsCOFE (Option α) where
   compl c := (c 0).map fun x => IsCOFE.compl (optionChain c x)
   conv_compl {n} c := by
-    have := c.cauchy (Nat.zero_le n); revert this
-    rcases c.chain 0 with _|x' <;> rcases e : c.chain n with _|y' <;> simp [Dist, Option.Forall₂]
+    have := c.cauchy (SIdx.le_0_l (n := n)); revert this
+    rcases c.chain 0 with _|x' <;> rcases e : c.chain n with _|y' <;> simp [Dist]
     refine fun _ => OFE.dist_eqv.trans IsCOFE.conv_compl ?_
     simp [optionChain, e]
+  lbcompl {n} hn c :=
+    (c.bchain 0 hn.limit_lt_0).map fun x => IsCOFE.lbcompl hn (optionBChain c x)
+  conv_lbcompl {n} hn c {m} hm := by
+    have := c.bcauchy hn.limit_lt_0 hm SIdx.le_0_l; revert this
+    rcases c.bchain 0 hn.limit_lt_0 with _ | x' <;> rcases e : c.bchain m hm with _ | y' <;>
+      simp [Dist]
+    refine fun _ => OFE.dist_eqv.trans (IsCOFE.conv_lbcompl hn _ hm) ?_
+    simp [optionBChain, e]
+  lbcompl_ne {n} hn c1 c2 {m} hc := by
+    have h0 := hc 0 hn.limit_lt_0
+    revert h0
+    rcases e1 : c1.bchain 0 hn.limit_lt_0 with _ | x1 <;>
+      rcases e2 : c2.bchain 0 hn.limit_lt_0 with _ | x2 <;>
+      simp only [Option.map, Dist] <;> intro h0
+    · trivial
+    · exact h0.elim
+    · exact h0.elim
+    · refine IsCOFE.lbcompl_ne hn _ _ (fun p hp => ?_)
+      have hp' := hc p hp
+      simp only [optionBChain]
+      cases f1 : c1.bchain p hp with
+      | none =>
+        cases f2 : c2.bchain p hp with rw [f1, f2] at hp'
+        | none => exact h0
+        | some _ => exact hp'.elim
+      | some _ =>
+        cases f2 : c2.bchain p hp with rw [f1, f2] at hp'
+        | none => exact hp'.elim
+        | some _ => exact hp'
 
 @[rocq_alias optionO_map]
 def optionMap {α β : Type _} [OFE α] [OFE β] (f : α -n> β) : Option α -n> Option β := by
   refine ⟨Option.map f, ⟨?_⟩⟩
-  rintro _ ⟨⟩ ⟨⟩ H <;> simp_all [Dist, Option.Forall₂]
+  rintro _ ⟨⟩ ⟨⟩ H <;> simp_all [Dist]
   exact f.ne.ne H
 
 @[rocq_alias option_fmap_ne]
 theorem Option.map_ne [OFE β] {f g : α → β} {x y : Option α} {n} :
     (∀ x y, x ≡{n}≡ y → f x ≡{n}≡ g y) → x ≡{n}≡ y → Option.map f x ≡{n}≡ Option.map g y := by
   intro hf hxy
-  cases x <;> cases y <;> simp_all [Dist, Option.Forall₂]
+  cases x <;> cases y <;> simp_all [Dist]
 
-theorem Option.map_forall₂ {α β : Type _} [OFE α] [OFE β] (f : α → β) [hf : OFE.NonExpansive f]
-    {o1 o2 : Option α} (h : o1 ≡ o2) : o1.map f ≡ o2.map f := by
-  cases o1 <;> cases o2 <;> simp_all []
-  exact hf.eqv h
+theorem Option.map_forall₂ {α β : Type _} (f : α → β)
+    {o1 o2 : Option α} (h : o1 = o2) : o1.map f = o2.map f := congrArg (Option.map f) h
 
 @[rocq_alias optionO_map_ne]
 instance optionMap_ne [OFE β] : NonExpansive (optionMap (α := α) (β := β)) where
@@ -1305,17 +1688,17 @@ instance optionMap_ne [OFE β] : NonExpansive (optionMap (α := α) (β := β)) 
 @[rocq_alias option_mbind_ne]
 theorem Option.bind_ne [OFE β] {f g : α → Option β} {x y : Option α} {n}
     (hf : ∀ x y, x ≡{n}≡ y → f x ≡{n}≡ g y) (hxy : x ≡{n}≡ y) : x.bind f ≡{n}≡ y.bind g := by
-  cases x <;> cases y <;> simp_all [Dist, Option.Forall₂]
+  cases x <;> cases y <;> simp_all [Dist]
 
 @[rocq_alias option_mjoin_ne]
 theorem Option.join_ne {x y : Option (Option α)} {n} (hxy : x ≡{n}≡ y) : x.join ≡{n}≡ y.join := by
-  cases x <;> cases y <;> simp_all [Dist, Option.Forall₂]
+  cases x <;> cases y <;> simp_all [Dist]
 
 @[rocq_alias from_option_ne]
 theorem Option.elim_ne {β : Type _} (R : β → β → Prop) {f g : α → β} {d d' : β}
     {x y : Option α} {n} (hf : ∀ x y, x ≡{n}≡ y → R (f x) (g y)) (hd : R d d')
     (hxy : x ≡{n}≡ y) : R (x.elim d f) (y.elim d' g) := by
-  cases x <;> cases y <;> simp_all [Dist, Option.Forall₂]
+  cases x <;> cases y <;> simp_all [Dist]
 
 end Option
 
@@ -1332,26 +1715,36 @@ instance oFunctorOption [OFunctor F] : OFunctor (OptionOF F) where
   ofe := _
   map f g := optionMap (OFunctor.map f g)
   map_ne.ne _ _ _ Hx _ _ Hy z := by
-    cases z <;> simp [optionMap, Dist, Option.Forall₂]
+    cases z <;> simp [optionMap, Dist]
     exact OFunctor.map_ne.ne Hx Hy ..
   map_id z := by
-    cases z <;> simp [optionMap, Equiv, Option.Forall₂]
-    exact OFunctor.map_id ..
-  map_comp _ _ _ _ z := by
-    cases z <;> simp [optionMap, Equiv, Option.Forall₂]
-    exact OFunctor.map_comp ..
+    cases z with
+    | none => rfl
+    | some c => exact Option.some_inj.mpr (OFunctor.map_id c)
+  map_comp f g f' g' z := by
+    cases z with
+    | none => rfl
+    | some c => exact Option.some_inj.mpr (OFunctor.map_comp f g f' g' c)
 
 @[rocq_alias optionOF_contractive]
 instance [OFunctorContractive F] : OFunctorContractive (OptionOF F) where
   map_contractive.1 H z := by
     have := (OFunctorContractive.map_contractive (F := F)).distLater_dist H
-    cases z <;> simp_all [optionMap, Dist, Option.Forall₂, Function.uncurry, OFunctor.map]
+    cases z <;> simp_all [optionMap, Dist, HasDist.dist, Option.Forall₂, Function.uncurry, OFunctor.map]
 
 end OptionOF
 
 section ProdOF
 
 open COFE
+
+theorem Prod.map_ext {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a = f' a)
+    (Hg : ∀ a, g a = g' a) : Prod.map f g x = Prod.map f' g' x :=
+  Prod.ext (Hf x.fst) (Hg x.snd)
+
+theorem Prod.map_ne [OFE A'] [OFE B'] {n} {f f' : A → A'} {g g' : B → B'}
+    (Hf : ∀ a, f a ≡{n}≡ f' a) (Hg : ∀ a, g a ≡{n}≡ g' a) : Prod.map f g x ≡{n}≡ Prod.map f' g' x :=
+  ⟨Hf x.fst, Hg x.snd⟩
 
 variable [OFE A] [OFE A'] [OFE B] [OFE B']
 
@@ -1365,16 +1758,6 @@ instance instNonExpansiveProdMap (f : A → A') (g : B → B') [NonExpansive f] 
     · rw [Prod.map_snd]
       exact NonExpansive.ne H.2
 
-omit [OFE A] [OFE B] in
-theorem Prod.map_ext {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a ≡ f' a)
-    (Hg : ∀ a, g a ≡ g' a) : Prod.map f g x ≡ Prod.map f' g' x :=
-  ⟨Hf x.fst, Hg x.snd⟩
-
-omit [OFE A] [OFE B] in
-theorem Prod.map_ne {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a ≡{n}≡ f' a)
-    (Hg : ∀ a, g a ≡{n}≡ g' a) : Prod.map f g x ≡{n}≡ Prod.map f' g' x :=
-  ⟨Hf x.fst, Hg x.snd⟩
-
 @[rocq_alias prodO_map]
 def Prod.mapO (f : A -n> A') (g : B -n> B') : A × B -n> A' × B' where
   f := .map f g
@@ -1384,7 +1767,8 @@ def Prod.mapO (f : A -n> A') (g : B -n> B') : A × B -n> A' × B' where
 instance Prod.mapO_ne : NonExpansive₂ (Prod.mapO (A := A) (A' := A') (B := B) (B' := B')) where
   ne _ _ _ Hf _ _ Hg _ := Prod.map_ne Hf Hg
 
-abbrev ProdOF (F1 F2 : OFunctorPre) : OFunctorPre := fun A B => (F1 A B) × (F2 A B)
+abbrev ProdOF (F1 F2 : OFunctorPre) : OFunctorPre :=
+  fun A B => (F1 A B) × (F2 A B)
 
 open OFunctor in
 @[rocq_alias prodOF]
@@ -1392,8 +1776,8 @@ instance instOFunctorProdOF [OFunctor F1] [OFunctor F2] : OFunctor (ProdOF F1 F2
   ofe := inferInstance
   map f g := Prod.mapO (map f g) (map f g)
   map_ne.ne _ _ _ Hx _ _ Hy _ := ⟨map_ne.ne Hx Hy _, map_ne.ne Hx Hy _⟩
-  map_id _ := ⟨map_id _, map_id _⟩
-  map_comp _ _ _ _ _ := ⟨map_comp .., map_comp ..⟩
+  map_id _ := Prod.ext (map_id _) (map_id _)
+  map_comp _ _ _ _ _ := Prod.ext (map_comp _ _ _ _ _) (map_comp _ _ _ _ _)
 
 open OFunctorContractive in
 @[rocq_alias prodOF_contractive]
@@ -1408,6 +1792,18 @@ section SumOF
 
 open COFE
 
+theorem Sum.map_ext {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a = f' a)
+    (Hg : ∀ a, g a = g' a) : Sum.map f g x = Sum.map f' g' x :=
+    match x with
+    | .inl _ => congrArg Sum.inl (Hf _)
+    | .inr _ => congrArg Sum.inr (Hg _)
+
+theorem Sum.map_ne [OFE A'] [OFE B'] {n} {f f' : A → A'} {g g' : B → B'}
+    (Hf : ∀ a, f a ≡{n}≡ f' a) (Hg : ∀ a, g a ≡{n}≡ g' a) : Sum.map f g x ≡{n}≡ Sum.map f' g' x :=
+    match x with
+    | .inl _ => dist_inl (Hf _)
+    | .inr _ => dist_inr (Hg _)
+
 variable [OFE A] [OFE A'] [OFE B] [OFE B']
 
 @[rocq_alias sum_map_ne]
@@ -1416,20 +1812,6 @@ instance instNonExpansiveSumMap (f : A → A') (g : B → B') [NonExpansive f] [
   ne _ x y H := match x, y with
     | .inl _, .inl _ => NonExpansive.ne (f := Sum.inl) (NonExpansive.ne (dist_ext_left H))
     | .inr _, .inr _ => NonExpansive.ne (f := Sum.inr) (NonExpansive.ne (dist_ext_right H))
-
-omit [OFE A] [OFE B] in
-theorem Sum.map_ext {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a ≡ f' a)
-    (Hg : ∀ a, g a ≡ g' a) : Sum.map f g x ≡ Sum.map f' g' x :=
-    match x with
-    | .inl _ => equiv_inl (Hf _)
-    | .inr _ => equiv_inr (Hg _)
-
-omit [OFE A] [OFE B] in
-theorem Sum.map_ne {f f' : A → A'} {g g' : B → B'} (Hf : ∀ a, f a ≡{n}≡ f' a)
-    (Hg : ∀ a, g a ≡{n}≡ g' a) : Sum.map f g x ≡{n}≡ Sum.map f' g' x :=
-    match x with
-    | .inl _ => dist_inl (Hf _)
-    | .inr _ => dist_inr (Hg _)
 
 @[rocq_alias sumO_map]
 def Sum.mapO (f : A -n> A') (g : B -n> B') : A ⊕ B -n> A' ⊕ B' where
@@ -1451,11 +1833,11 @@ instance instOFunctorSumOF [OFunctor F1] [OFunctor F2] : OFunctor (SumOF F1 F2) 
     | .inl _ => dist_inl (map_ne.ne Hx Hy _)
     | .inr _ => dist_inr (map_ne.ne Hx Hy _)
   map_id x := match x with
-    | .inl _ => equiv_inl (map_id _)
-    | .inr _ => equiv_inr (map_id _)
+    | .inl _ => congrArg Sum.inl (map_id _)
+    | .inr _ => congrArg Sum.inr (map_id _)
   map_comp _ _ _ _ x := match x with
-    | .inl _ => equiv_inl (map_comp ..)
-    | .inr _ => equiv_inr (map_comp ..)
+    | .inl _ => congrArg Sum.inl (map_comp _ _ _ _ _)
+    | .inr _ => congrArg Sum.inr (map_comp _ _ _ _ _)
 
 open OFunctorContractive in
 @[rocq_alias sumOF_contractive]
@@ -1486,8 +1868,9 @@ instance instOFunctorSigmaOF {F : A → OFunctorPre} [∀ a, OFunctor (F a)] : O
   ofe := inferInstance
   map f g := Sigma.mapO (fun _ => map f g)
   map_ne.ne _ _ _ Hx _ _ Hy := NonExpansive.ne (fun _ => map_ne.ne Hx Hy)
-  map_id _ _ := ⟨rfl, (map_id _).dist⟩
-  map_comp _ _ _ _ _ _ := ⟨rfl, (map_comp _ _ _ _ _).dist⟩
+  map_id x := by obtain ⟨a, v⟩ := x; exact congrArg (Sigma.mk a) (OFunctor.map_id v)
+  map_comp f g f' g' x := by
+    obtain ⟨a, v⟩ := x; exact congrArg (Sigma.mk a) (OFunctor.map_comp f g f' g' v)
 
 open OFunctorContractive in
 @[rocq_alias sigTOF_contractive]
@@ -1529,8 +1912,8 @@ instance : OFunctor IdOF where
   ofe := inferInstance
   map _ g := g
   map_ne.ne _ _ _ _ _ _ Hy := Hy
-  map_id _ := .rfl
-  map_comp _ _ _ _ _ := .rfl
+  map_id _ := rfl
+  map_comp _ _ _ _ _ := rfl
 
 end IdOF
 
@@ -1562,9 +1945,9 @@ instance instOFunctorHomOF [OFunctor F1] [OFunctor F2] : OFunctor (HomOF F1 F2) 
   ofe := inferInstance
   map f g := Hom.map (map (F := F1) g f) (map (F := F2) f g)
   map_ne.ne _ _ _ Hf _ _ Hg := NonExpansive₂.ne (map_ne.ne Hg Hf) (map_ne.ne Hf Hg)
-  map_id {_ _ _ _ _} _ := (map_id _).trans (NonExpansive.eqv (map_id _))
-  map_comp _ _ _ _ _ _ := (map_comp _ _ _ _ _).trans
-    (NonExpansive.eqv (NonExpansive.eqv (NonExpansive.eqv ((map_comp _ _ _ _ _).trans .rfl))))
+  map_id x := eq_dist.mpr fun _ a => ((map_id _).trans (congrArg x.f (map_id a))).dist
+  map_comp _ _ _ _ x := OFE.eq_dist.mpr fun _ _ =>
+    ((map_comp ..).trans (congrArg _ (congrArg _ (congrArg x.f (map_comp ..))))).dist
 
 open OFunctorContractive in
 @[rocq_alias ofe_morOF_contractive]
@@ -1573,11 +1956,8 @@ instance instOFunctorContractiveHomOF [OFunctorContractive F1] [OFunctorContract
   map_contractive.1 {n} ab ab' h := match ab, ab' with
     | ⟨a, b⟩, ⟨a', b'⟩ => by
       simp only [Function.uncurry_apply_pair, OFunctor.map]
-      have h' : DistLater n (b, a) (b', a') :=
-        match n with
-        | 0 => distLater_zero
-        | _ + 1 => distLater_succ.mpr ⟨(distLater_succ.mp h).2, (distLater_succ.mp h).1⟩
-      refine NonExpansive₂.ne ?_ ?_
+      have h' : DistLater n (b, a) (b', a') := fun m hm => ⟨(h m hm).right, (h m hm).left⟩
+      refine NonExpansive₂.ne (f := Hom.map) ?_ ?_
       · exact (map_contractive (F := F1)).1 h'
       · exact (map_contractive (F := F2)).1 h
 
@@ -1585,59 +1965,181 @@ end HomOF
 
 section Fixpoint
 
-@[rocq_alias LimitPreserving]
-def LimitPreserving [COFE α] (P : α → Prop) : Prop :=
-  ∀ (c : Chain α), (∀ n, P (c n)) → P (COFE.compl c)
+@[indexed SI, rocq_alias LimitPreserving]
+class LimitPreserving [COFE α] (P : α → Prop) : Prop where
+  compl (c : Chain α) : (∀ n, P (c n)) → P (COFE.compl c)
+  lbcompl {n} (hn : SIdx.Limit n) (c : BChain α n) :
+    (∀ m (hm : m < n), P (c.bchain m hm)) → P (IsCOFE.lbcompl hn c)
+
+variable (SI) in
+abbrev LimitPreservingᵢ [COFE α] (P : α → Prop) := LimitPreserving P
 
 @[rocq_alias limit_preserving_const]
-theorem LimitPreserving.const [COFE α] {P : Prop} : LimitPreserving fun (_ : α) => P := by
-  simp [LimitPreserving]
+theorem LimitPreserving.const [COFE α] {P : Prop} : LimitPreserving fun (_ : α) => P where
+  compl _ H := H 0
+  lbcompl hn _ H := H 0 hn.limit_lt_0
 
 @[rocq_alias limit_preserving_discrete]
-theorem LimitPreserving.discrete [COFE α] {P : α → Prop} :
-    (∀ {x y : α}, x ≡{0}≡ y → (P x → P y)) → LimitPreserving P :=
-  fun Hdisc _ H => Hdisc COFE.conv_compl.symm (H _)
+theorem LimitPreserving.discrete [COFE α] {P : α → Prop}
+    (hdiscrete : ∀ {x y : α}, x ≡{0}≡ y → (P x → P y)) : LimitPreserving P where
+  compl _ H := hdiscrete (COFE.conv_compl (n := 0)).symm (H 0)
+  lbcompl hn c H := hdiscrete (IsCOFE.conv_lbcompl hn c hn.limit_lt_0).symm (H 0 hn.limit_lt_0)
 
 @[rocq_alias limit_preserving_and]
 theorem LimitPreserving.and [COFE α] {P Q : α → Prop} (HP : LimitPreserving P)
-    (HQ : LimitPreserving Q) : LimitPreserving fun a => P a ∧ Q a :=
-  fun _ HPQ => ⟨HP _ (fun n => (HPQ n).left), HQ _ (fun n => (HPQ n).right)⟩
+    (HQ : LimitPreserving Q) : LimitPreserving fun a => P a ∧ Q a where
+  compl c H := by
+    constructor
+    · exact HP.compl c fun n => (H n).left
+    · exact HQ.compl c fun n => (H n).right
+  lbcompl hn c H := by
+    constructor
+    · exact HP.lbcompl hn c fun m hm => (H m hm).left
+    · exact HQ.lbcompl hn c fun m hm => (H m hm).right
 
 @[rocq_alias limit_preserving_forall]
 theorem LimitPreserving.forall [COFE α] (P : β → α → Prop) (Hlim : ∀ y, LimitPreserving (P y)) :
-    LimitPreserving (∀ y, P y ·) :=
-  fun c H y => Hlim y c (H · y)
+    LimitPreserving (∀ y, P y ·) where
+  compl c H y := (Hlim y).compl c fun n => H n y
+  lbcompl hn c H y := (Hlim y).lbcompl hn c fun m hm => H m hm y
 
 @[rocq_alias limit_preserving_impl]
 theorem LimitPreserving.impl [COFE α] (P1 P2 : α → Prop)
     (HP1 : ∀ {x y : α}, x ≡{0}≡ y → P1 x → P1 y)
     (Hcompl : LimitPreserving P2) :
+    LimitPreserving (fun x => P1 x → P2 x) where
+  compl c Hc HP1c :=
+    Hcompl.compl c fun n => Hc n (HP1 (COFE.conv_compl' SIdx.le_0_l) HP1c)
+  lbcompl hn c Hc HP1c :=
+    Hcompl.lbcompl hn c fun m hm =>
+      Hc m hm (HP1 ((IsCOFE.conv_lbcompl hn c hm).le SIdx.le_0_l) HP1c)
+
+@[rocq_alias limit_preserving_impl']
+theorem LimitPreserving.impl' [COFE α] (P1 P2 : α → Prop)
+    (HP1 : ∀ {x y : α}, x ≡{0}≡ y → (P1 x ↔ P1 y))
+    (Hcompl : LimitPreserving P2) :
     LimitPreserving (fun x => P1 x → P2 x) :=
-  fun _ Hc HP1c => Hcompl _ <| fun n => Hc _ (HP1 (COFE.conv_compl' (Nat.zero_le n)) HP1c)
+  LimitPreserving.impl P1 P2 (fun h => (HP1 h).mp) Hcompl
+
+@[rocq_alias limit_preserving_sidx_finite]
+theorem LimitPreserving.of_sidx_finite [SIdxFinite SI] [COFE α] {P : α → Prop} :
+    (∀ c : Chain α, (∀ n, P (c n)) → P (COFE.compl c)) ↔ LimitPreserving P := by
+  constructor <;> intro h
+  · exact { compl := h, lbcompl hn _ _ := absurd hn (SIdx.limit_finite _) }
+  · exact h.compl
 
 @[rocq_alias limit_preserving_equiv]
-theorem LimitPreserving.equiv [COFE α] [COFE β] (f g : α -n> β) :
-    LimitPreserving (fun x => f x ≡ g x) := by
+theorem LimitPreserving.equiv [SIdxFinite SI] [COFE α] [COFE β] (f g : α -n> β) :
+    LimitPreserving (fun x => f x = g x) := by
+  apply of_sidx_finite.mp
   intro c Hfg
-  refine equiv_dist.mpr fun n => ?_
-  apply (COFE.compl_map ..).symm.dist.trans
-  apply (COFE.conv_compl' (Nat.le_refl n)).trans
+  refine eq_dist.mpr fun n => ?_
+  apply (COFE.compl_map _ _).symm.dist.trans
+  apply (COFE.conv_compl' SIdx.le_refl).trans
   apply (Hfg _).dist.trans
   exact g.ne.ne COFE.conv_compl.symm
 
 @[rocq_alias limit_preserving_ext]
-theorem LimitPreserving.ext {α}[COFE α] {P Q : α -> Prop} (he : ∀ {x}, (P x ↔ Q x))
-    (hp : LimitPreserving P) : LimitPreserving Q := fun _ => (he.1 <| hp _ <| fun _ => he.2 <| · _)
+theorem LimitPreserving.ext {α} [COFE α] {P Q : α -> Prop} (he : ∀ {x}, (P x ↔ Q x))
+    (hp : LimitPreserving P) : LimitPreserving Q where
+  compl c H := he.mp (hp.compl c fun n => he.mpr (H n))
+  lbcompl hn c H := he.mp (hp.lbcompl hn c fun m hm => he.mpr (H m hm))
 
-def Fixpoint.chain [OFE α] [Inhabited α] (f : α → α) [Contractive f] : Chain α where
-  chain n := Nat.repeat f (n + 1) default
-  cauchy {n} := by
-    induction n with simp [Nat.repeat] | succ n IH
-    rintro (_|i) <;> simp
-    intro H
-    apply Contractive.distLater_dist
-    intro _ Hm
-    exact (IH H).le (Nat.le_of_lt_succ Hm)
+section BCompl
+
+variable [COFE α] [Inhabited α]
+
+@[rocq_alias bcompl]
+def bcompl (n) (c : BChain α n) : α :=
+  match SIdx.case n with
+  | .inl _              => default
+  | .inr (.inl ⟨m, hm⟩) => c.bchain m (SIdx.lt_succ_diag_r' hm)
+  | .inr (.inr hlim)    => IsCOFE.lbcompl hlim c
+
+@[rocq_alias conv_bcompl]
+theorem conv_bcompl {n} (c : BChain α n) {m} (hm : m < n) :
+    bcompl n c ≡{m}≡ c.bchain m hm := by
+  unfold bcompl
+  rcases hcase : SIdx.case n with h0 | ⟨p, hp⟩ | hlim
+  · exact absurd (h0 ▸ hm) (SIdx.not_lt_zero m)
+  · exact c.bcauchy _ _ (SIdx.lt_succ_r.mp (hp ▸ hm))
+  · exact IsCOFE.conv_lbcompl hlim c hm
+
+@[rocq_alias bcompl_ne]
+theorem bcompl_ne {n} (c1 c2 : BChain α n) {m}
+    (Hc : ∀ p (hp : p < n), c1.bchain p hp ≡{m}≡ c2.bchain p hp) :
+    bcompl n c1 ≡{m}≡ bcompl n c2 := by
+  unfold bcompl
+  rcases hcase : SIdx.case n with h0 | ⟨p, hp⟩ | hlim
+  · rfl
+  · exact Hc _ _
+  · exact IsCOFE.lbcompl_ne hlim c1 c2 Hc
+
+@[rocq_alias limit_preserving_bcompl]
+theorem LimitPreserving.bcompl {P : α → Prop} (n) (c : BChain α n)
+    (H0 : n ≠ 0 ∨ P default) (HP : LimitPreserving P)
+    (Hc : ∀ m (hm : m < n), P (c.bchain m hm)) : P (bcompl n c) := by
+  unfold Iris.bcompl
+  rcases hcase : SIdx.case n with h0 | ⟨p, hp⟩ | hlim
+  · exact H0.resolve_left (fun hne => hne h0)
+  · exact Hc _ _
+  · exact HP.lbcompl hlim c Hc
+
+end BCompl
+
+section BFChain
+
+variable [COFE α] [Inhabited α] (f : α → α) [Contractive f]
+
+@[rocq_alias bfchain]
+structure BFChain (n) where
+  car : BChain α n
+  fixpoint : ∀ p, p < n → f (bcompl n car) ≡{p}≡ bcompl n car
+
+@[rocq_alias bfchain_chain_unique]
+theorem BFChain.unique {n m} (c1 : BFChain f n) (c2 : BFChain f m) :
+    ∀ p, p < n → p < m → bcompl n c1.car ≡{p}≡ bcompl m c2.car := by
+  intro p
+  induction p using (SIdx.lt_wf (I := SI)).induction with
+  | h p IH =>
+    intro Hn Hm
+    refine ((c1.fixpoint p Hn).symm.trans ?_).trans (c2.fixpoint p Hm)
+    exact Contractive.distLater_dist fun q Hq =>
+      IH q Hq (SIdx.lt_trans Hq Hn) (SIdx.lt_trans Hq Hm)
+
+def BFChain.goChain (n) (rec : ∀ m, m < n → BFChain f m) : BChain α n where
+  bchain m Hm := f (bcompl m (rec m Hm).car)
+  bcauchy := fun {m} {p} Hm Hp Hmp =>
+    Contractive.distLater_dist fun q Hq =>
+      BFChain.unique f (rec p Hp) (rec m Hm) q (SIdx.lt_le_trans Hq Hmp) Hq
+
+@[rocq_alias fixpoint_bchain_go]
+def BFChain.go (n) (rec : ∀ m, m < n → BFChain f m) : BFChain f n where
+  car := BFChain.goChain f n rec
+  fixpoint p Hp := by
+    refine .trans (Contractive.distLater_dist (y := bcompl p (rec p Hp).car) ?_)
+      (conv_bcompl (BFChain.goChain f n rec) Hp).symm
+    intro q Hq
+    exact ((conv_bcompl (BFChain.goChain f n rec) Hp).lt Hq).trans ((rec p Hp).fixpoint q Hq)
+
+@[rocq_alias fixpoint_bchain]
+def fixpointBFChain (n) : BFChain f n := SIdx.lt_wf.fix (BFChain.go f) n
+
+theorem fixpointBFChain_unfold (n) :
+    fixpointBFChain f n = BFChain.go f n (fun m _ => fixpointBFChain f m) :=
+  SIdx.lt_wf.fix_eq (BFChain.go f) n
+
+end BFChain
+
+@[rocq_alias fixpoint_chain]
+def Fixpoint.chain [COFE α] [Inhabited α] (f : α → α) [Contractive f] : Chain α where
+  chain n := f (bcompl n (fixpointBFChain f n).car)
+  cauchy {n i} H := by
+    rcases SIdx.le_lteq.mp H with (Hni | rfl)
+    · exact Contractive.distLater_dist fun p Hp =>
+        BFChain.unique f (fixpointBFChain f i) (fixpointBFChain f n) p
+          (SIdx.lt_trans Hp Hni) Hp
+    · rfl
 
 /-- The chain construction of the Banach fixpoint. `fixpointP` packages it, together with
 its unfolding equation, behind an opaque constant. -/
@@ -1645,18 +2147,16 @@ def fixpointAux [COFE α] [Inhabited α] (f : α → α) [Contractive f] : α :=
   COFE.compl <| Fixpoint.chain f
 
 theorem fixpointAux_unfold [COFE α] [Inhabited α] (f : α -c> α) :
-    fixpointAux f ≡ f (fixpointAux f) := by
-  refine equiv_dist.mpr fun n => ?_
+    fixpointAux f = f (fixpointAux f) := by
+  refine eq_dist.mpr fun n => ?_
   apply COFE.conv_compl.trans
   refine .trans ?_ (NonExpansive.ne COFE.conv_compl.symm)
-  induction n with
-  | zero => exact Contractive.zero f.f
-  | succ _ IH => exact (Contractive.succ f.f IH.symm).symm
+  exact Contractive.distLater_dist fun p Hp => ((fixpointBFChain f.f n).fixpoint p Hp).symm
 
 /-- The Banach fixpoint packed together with its unfolding equation as a single opaque
 value. Being opaque, it is a stuck constant for definitional-equality checks in both the
 elaborator and the kernel, which keeps the approximation chain of `fixpointAux` sealed. -/
-opaque fixpointP [COFE α] [Inhabited α] (f : α → α) [Contractive f] : { x : α // x ≡ f x } :=
+opaque fixpointP [COFE α] [Inhabited α] (f : α → α) [Contractive f] : { x : α // x = f x } :=
   ⟨fixpointAux f, fixpointAux_unfold f.toContractiveHom⟩
 
 /-- Fixpoints inside of a COFE -/
@@ -1671,50 +2171,97 @@ nonrec abbrev OFE.ContractiveHom.fixpoint [COFE α] [Inhabited α] (f : α -c> �
 
 @[rocq_alias fixpoint_unfold]
 theorem fixpoint_unfold [COFE α] [Inhabited α] (f : α -c> α) :
-    fixpoint f ≡ f (fixpoint f) :=
+    fixpoint f = f (fixpoint f) :=
   (fixpointP f).property
 
 @[rocq_alias fixpoint_unique]
-theorem fixpoint_unique [COFE α] [Inhabited α] {f : α -c> α} {x : α} (H : x ≡ f x) :
-    x ≡ fixpoint f := by
-  refine equiv_dist.mpr fun n => ?_
-  induction n with refine H.dist.trans <| .trans ?_ (fixpoint_unfold f).dist.symm
-  | zero => exact Contractive.zero f.f
-  | succ _ IH => exact Contractive.succ f.f IH
+theorem fixpoint_unique [COFE α] [Inhabited α] {f : α -c> α} {x : α} (h : x = f x) :
+    x = fixpoint f := by
+  refine eq_dist.mpr fun n => ?_
+  induction n using (SIdx.lt_wf (I := SI)).induction with
+  | h n ih =>
+    exact h.dist.trans <| Dist.trans (Contractive.distLater_dist ih) (fixpoint_unfold f).dist.symm
 
 @[rocq_alias fixpoint_ne]
 instance OFE.ContractiveHom.fixpoint_ne [COFE α] [Inhabited α] :
     NonExpansive (ContractiveHom.fixpoint (α := α)) where
-  ne n f1 f2 H := by
-    induction n with
-      refine (fixpoint_unfold f1).dist.trans <|
-        ((H _).trans ?_).trans (fixpoint_unfold f2).dist.symm
-    | zero => exact Contractive.zero f2.f
-    | succ _ IH => exact Contractive.succ f2.f <| IH <| Dist.lt H (Nat.lt_add_one _)
+  ne n f1 f2 h := by
+    revert h
+    induction n using (SIdx.lt_wf (I := SI)).induction with
+    | h n ih =>
+      intro h
+      calc
+        _ ≡{n}≡ f1.f (Iris.fixpoint f1.f) := (fixpoint_unfold f1).dist
+        _ ≡{n}≡ f2.f (Iris.fixpoint f1.f) := h _
+        _ ≡{n}≡ f2.f (Iris.fixpoint f2.f) := Contractive.distLater_dist fun p Hp => ih p Hp (h.lt Hp)
+        _ ≡{n}≡ Iris.fixpoint f2.f        := (fixpoint_unfold f2).dist.symm
+
+theorem fixpoint_dist [COFE α] [Inhabited α] {f g : α → α} [Contractive f] [Contractive g] {n}
+    (H : ∀ z, f z ≡{n}≡ g z) : fixpoint f ≡{n}≡ fixpoint g :=
+  (OFE.ContractiveHom.fixpoint_ne (α := α)).ne
+    (x₁ := f.toContractiveHom) (x₂ := g.toContractiveHom) H
+
+@[rocq_alias fixpoint_proper]
+theorem fixpoint_proper [COFE α] [Inhabited α] {f g : α → α} [Contractive f] [Contractive g]
+    (H : ∀ x, f x = g x) : fixpoint f = fixpoint g :=
+  funext H ▸ rfl
 
 @[elab_as_elim, rocq_alias fixpoint_ind]
 theorem OFE.ContractiveHom.fixpoint_ind [COFE α] [Inhabited α] (f : α -c> α)
-    (P : α → Prop) (HProper : ∀ A B : α, A ≡ B → P A → P B) (x : α) (Hbase : P x)
-    (Hind : ∀ x, P x → P (f x)) (Hlim : LimitPreserving P) :
+    (P : α → Prop) (x : α) (Hbase : P x) (Hind : ∀ x, P x → P (f x)) (Hlim : LimitPreserving P) :
     P f.fixpoint := by
-  let chain : Chain α := by
-    refine ⟨fun i => Nat.repeat f (i + 1) x, fun {n i} H => ?_⟩
-    induction n generalizing i with
-    | zero => simp [Nat.repeat]
-    | succ _ IH =>
-      cases i <;> simp at H
-      exact Contractive.succ _ <| IH H
-  refine HProper _ _ (fixpoint_unique (x := COFE.compl chain) ?_) ?_
-  · refine equiv_dist.mpr fun n => ?_
-    apply COFE.conv_compl.trans
-    refine .trans ?_ (f.ne.ne COFE.conv_compl).symm
-    induction n
-    · exact Contractive.zero f.f
-    · rename_i IH; apply Contractive.succ _ IH
-  · apply Hlim; intro n
-    induction n with
-    | zero => exact Hind (Nat.repeat f.f 0 x) Hbase
-    | succ _ IH => apply Hind (Nat.repeat f.f _ x) IH
+  obtain ⟨y, hy, hfy⟩ : ∃ y : α, P y ∧ y = f y := by
+    letI : Inhabited α := ⟨x⟩
+    exists fixpointAux f.f
+    constructor
+    · refine Hlim.compl (Fixpoint.chain f.f) fun n => Hind _ ?_
+      induction n using (SIdx.lt_wf (I := SI)).induction with
+      | h n ih =>
+        refine LimitPreserving.bcompl n _ (.inr Hbase) Hlim fun m hm => ?_
+        rw [fixpointBFChain_unfold]
+        exact Hind _ (ih m hm)
+    · exact fixpointAux_unfold f
+  exact (congrArg P (fixpoint_unique hfy)).mp hy
+
+theorem repeat_dist [OFE α] (f g : α → α) [NonExpansive f] {n} (Hfg : ∀ z, f z ≡{n}≡ g z) :
+    ∀ k z, Nat.repeat f k z ≡{n}≡ Nat.repeat g k z :=
+  Nat.repeat_rel dist_eqv (fun h => NonExpansive.ne h) Hfg
+
+@[rocq_alias fixpointK]
+def fixpointK [COFE α] [Inhabited α] (k : Nat) (f : α → α)
+    [Contractive (Nat.repeat f k)] : α := fixpoint (Nat.repeat f k)
+
+@[rocq_alias fixpointK_unfold]
+theorem fixpointK_unfold [COFE α] [Inhabited α] (k : Nat) (f : α → α)
+    [Contractive (Nat.repeat f k)] : fixpointK k f = f (fixpointK k f) := by
+  refine (fixpoint_unique (f := (Nat.repeat f k).toContractiveHom) ?_).symm
+  change f (fixpointK k f) = Nat.repeat f k (f (fixpointK k f))
+  refine ((Nat.repeat_apply_comm f k (fixpointK k f)).trans (congrArg f ?_)).symm
+  exact (fixpoint_unfold (Nat.repeat f k).toContractiveHom).symm
+
+@[rocq_alias fixpointK_unique]
+theorem fixpointK_unique [COFE α] [Inhabited α] (k : Nat) (f : α → α)
+    [Contractive (Nat.repeat f k)] {x : α} (H : x = f x) : x = fixpointK k f :=
+  fixpoint_unique (f := (Nat.repeat f k).toContractiveHom) (Nat.repeat_fixed f H k)
+
+@[rocq_alias fixpointK_ne]
+theorem fixpointK_ne [COFE α] [Inhabited α] (k : Nat) (f g : α → α)
+    [Contractive (Nat.repeat f k)] [Contractive (Nat.repeat g k)] [NonExpansive f] {n}
+    (Hfg : ∀ z, f z ≡{n}≡ g z) : fixpointK k f ≡{n}≡ fixpointK k g :=
+  fixpoint_dist (repeat_dist f g Hfg k)
+
+@[rocq_alias fixpointK_proper]
+theorem fixpointK_proper [COFE α] [Inhabited α] (k : Nat) (f g : α → α)
+    [Contractive (Nat.repeat f k)] [Contractive (Nat.repeat g k)] [NonExpansive f]
+    (Hfg : ∀ z, f z = g z) : fixpointK k f = fixpointK k g :=
+  eq_dist.mpr fun _ => fixpointK_ne k f g fun z => (Hfg z).dist
+
+@[elab_as_elim, rocq_alias fixpointK_ind]
+theorem fixpointK_ind [COFE α] [Inhabited α] (k : Nat) (f : α → α) [Contractive (Nat.repeat f k)]
+    (P : α → Prop) (x : α) (Hbase : P x)
+    (Hind : ∀ x, P x → P (f x)) (Hlim : LimitPreserving P) : P (fixpointK k f) :=
+  OFE.ContractiveHom.fixpoint_ind (Nat.repeat f k).toContractiveHom P x Hbase
+    (fun _ Hy => Nat.repeat_ind f Hind Hy k) Hlim
 
 end Fixpoint
 
@@ -1738,7 +2285,7 @@ instance ne₂_of_contractive [OFE α] [OFE β] [OFE γ] (fB : α -c> β -c> γ)
     apply fB.ne.ne Hx
 
 @[rocq_alias fixpoint_AB]
-def fixpointAB [COFE α] [COFE β] [Inhabited α] [Inhabited β] (fB : α -c> β -c> β) (x : α) : β := by
+def fixpointAB [COFE α] [COFE β] [Inhabited β] (fB : α -c> β -c> β) (x : α) : β := by
   let con_hom : β -c> β := {
     f := fB x,
     contractive := ⟨fB.f x |>.contractive.distLater_dist⟩
@@ -1746,20 +2293,20 @@ def fixpointAB [COFE α] [COFE β] [Inhabited α] [Inhabited β] (fB : α -c> β
   exact con_hom.fixpoint
 
 @[rocq_alias fixpoint_AB_contractive]
-theorem fixpointAB_contractive [COFE α] [COFE β] [Inhabited α] [Inhabited β] (fB : α -c> β -c> β) :
+theorem fixpointAB_contractive [COFE α] [COFE β] [Inhabited β] (fB : α -c> β -c> β) :
     Contractive (fixpointAB fB) where
-  distLater_dist {n _ _} Dl := by
+  distLater_dist {n} {_ _} Dl := by
     apply ContractiveHom.fixpoint_ne.ne
     apply fB.contractive.distLater_dist
     exact Dl
 
 @[rocq_alias fixpoint_AA]
-def fixpointAA [COFE α] [COFE β] [Inhabited α] [Inhabited β] (fA : α -c> β -n> α)
+def fixpointAA [COFE α] [COFE β] [Inhabited β] (fA : α -c> β -n> α)
     (fB : α -c> β -c> β) (x : α) : α :=
   fA x (fixpointAB fB x)
 
 @[rocq_alias fixpoint_AA_contractive]
-theorem fixpointAA_contractive [COFE α] [COFE β] [Inhabited α] [Inhabited β]
+theorem fixpointAA_contractive [COFE α] [COFE β] [Inhabited β]
     (fA : α -c> β -n> α) (fB : α -c> β -c> β) : Contractive (fixpointAA fA fB) where
   distLater_dist {_ _ x₂} Dl := by
     refine .trans ?_ ((fA.f x₂).ne.ne ((fixpointAB_contractive fB).distLater_dist Dl))
@@ -1783,35 +2330,27 @@ def fixpointB [COFE α] [COFE β] [Inhabited α] [Inhabited β]
 @[rocq_alias fixpoint_A_unfold]
 theorem fixpointA_unfold [COFE α] [COFE β] [Inhabited α] [Inhabited β]
     (fA : α -c> β -n> α) (fB : α -c> β -c> β) :
-    fA (fixpointA fA fB) (fixpointB fA fB) ≡ (fixpointA fA fB) := by
+    fA (fixpointA fA fB) (fixpointB fA fB) = (fixpointA fA fB) := by
   exact .symm (fixpoint_unfold _)
 
 @[rocq_alias fixpoint_B_unfold]
 theorem fixpointB_unfold [COFE α] [COFE β] [Inhabited α] [Inhabited β]
     (fA : α -c> β -n> α) (fB : α -c> β -c> β) :
-    fB (fixpointA fA fB) (fixpointB fA fB) ≡ (fixpointB fA fB) := by
+    fB (fixpointA fA fB) (fixpointB fA fB) = (fixpointB fA fB) := by
   exact .symm (fixpoint_unfold _)
 
 @[rocq_alias fixpoint_A_unique]
 theorem fixpointA_unique [COFE α] [COFE β] [Inhabited α] [Inhabited β]
-    (fA : α -c> β -n> α) (fB : α -c> β -c> β) (Hp : fA p q ≡ p) (Hq : fB p q ≡ q) :
-    p ≡ (fixpointA fA fB) := by
-  refine Hp.symm.trans ?_
-  apply fixpoint_unique
-  have := ne₂_of_contractive_ne fA
-  refine NonExpansive₂.eqv (f := fA) Hp.symm ?_
-  apply fixpoint_unique
-  have := ne₂_of_contractive fB
-  exact Hq.symm.trans (NonExpansive₂.eqv (f := fB) Hp.symm .rfl)
+    (fA : α -c> β -n> α) (fB : α -c> β -c> β) (Hp : fA p q = p) (Hq : fB p q = q) :
+    p = (fixpointA fA fB) :=
+    fixpoint_unique <| Hp.symm.trans <| congrArg (fA p) (fixpoint_unique Hq.symm)
 
 @[rocq_alias fixpoint_B_unique]
 theorem fixpointB_unique [COFE α] [COFE β] [Inhabited α] [Inhabited β]
-    (fA : α -c> β -n> α) (fB : α -c> β -c> β) (Hp : fA p q ≡ p) (Hq : fB p q ≡ q) :
-    q ≡ (fixpointB fA fB) := by
+    (fA : α -c> β -n> α) (fB : α -c> β -c> β) (Hp : fA p q = p) (Hq : fB p q = q) :
+    q = (fixpointB fA fB) := by
   apply fixpoint_unique
-  have := ne₂_of_contractive fB
-  refine Hq.symm.trans (NonExpansive₂.eqv (f := fB) ?_ .rfl)
-  exact fixpointA_unique fA fB Hp Hq
+  exact Hq.symm.trans (congrArg (fun z => fB z q) (fixpointA_unique fA fB Hp Hq))
 
 @[rocq_alias fixpoint_A_ne]
 instance fixpointA_ne [COFE α] [COFE β] [Inhabited α] [Inhabited β] :
@@ -1831,6 +2370,20 @@ instance fixpointB_ne [COFE α] [COFE β] [Inhabited α] [Inhabited β] :
     refine ((ne₂_of_contractive fB).ne ?_ .rfl).trans (HfB _ z₁)
     exact fixpointA_ne.ne HfA HfB
 
+@[rocq_alias fixpoint_A_proper]
+theorem fixpointA_proper [COFE α] [COFE β] [Inhabited α] [Inhabited β]
+    (fA fA' : α -c> β -n> α) (fB fB' : α -c> β -c> β)
+    (HA : ∀ x y, fA x y = fA' x y) (HB : ∀ x y, fB x y = fB' x y) :
+    fixpointA fA fB = fixpointA fA' fB' :=
+  eq_dist.mpr fun _ => fixpointA_ne.ne (fun x y => (HA x y).dist) (fun x y => (HB x y).dist)
+
+@[rocq_alias fixpoint_B_proper]
+theorem fixpointB_proper [COFE α] [COFE β] [Inhabited α] [Inhabited β]
+    (fA fA' : α -c> β -n> α) (fB fB' : α -c> β -c> β)
+    (HA : ∀ x y, fA x y = fA' x y) (HB : ∀ x y, fB x y = fB' x y) :
+    fixpointB fA fB = fixpointB fA' fB' :=
+  eq_dist.mpr fun _ => fixpointB_ne.ne (fun x y => (HA x y).dist) (fun x y => (HB x y).dist)
+
 end FixpointAB
 
 section Later
@@ -1840,13 +2393,13 @@ section Later
 
 @[rocq_alias later_ofe_mixin]
 instance isOFE_later [OFE A] : OFE (Later A) where
-  Equiv x y := x.car ≡ y.car
-  Dist n x y := DistLater n x.car y.car
+  dist n x y := DistLater n x.car y.car
   dist_eqv := ⟨fun _ => .rfl, .symm, .trans⟩
-  equiv_dist := by
-    simp only [equiv_dist, DistLater]
-    exact ⟨by simp +contextual, fun H n => H (Nat.succ n) n (by simp)⟩
-  dist_lt Hxy Hmn _ Hkm := Hxy _ (Nat.lt_trans Hkm Hmn)
+  eq_dist' {x y} := by
+    obtain ⟨a⟩ := x; obtain ⟨b⟩ := y
+    rw [Later.next.injEq, eq_dist]
+    exact ⟨fun H n => (H n).distLater, fun H n => (H (SIdx.succ n)).dist_lt (SIdx.lt_succ_self n)⟩
+  dist_lt Hxy Hmn _ Hkm := Hxy _ (SIdx.lt_trans Hkm Hmn)
 #rocq_ignore laterO "Use the later type"
 
 #rocq_ignore later_equiv "Local Equiv instance; folded into Lean's OFE (Later A) instance."
@@ -1857,24 +2410,53 @@ instance isOFE_later [OFE A] : OFE (Later A) where
 instance NextContractive {A : Type _} [OFE A] : Contractive (@Later.next A) where
   distLater_dist := id
 
+#rocq_ignore Next_inj "`Inj` instance; `Later` dist is definitionally `DistLater` on the payload."
+#rocq_ignore later_car_anti_contractive
+  "`Proper` setoid instance; `Later` dist is definitionally `DistLater` on the payload."
+
+@[rocq_alias Next_uninj]
+theorem Later.uninj {A : Type _} (x : Later A) : ∃ a, x = Later.next a := ⟨x.car, rfl⟩
+
+@[rocq_alias contractive_alt]
+theorem contractive_alt [OFE A] [OFE B] (f : A → B) :
+    Contractive f ↔ ∃ g : Later A → B, NonExpansive g ∧ ∀ x, f x = g (Later.next x) := by
+  refine ⟨fun hf => ⟨fun x => f x.car, ⟨fun _ _ _ h => hf.distLater_dist h⟩, fun _ => rfl⟩, ?_⟩
+  rintro ⟨g, hg, hf⟩
+  refine ⟨fun {n} {x y} h => ?_⟩
+  rw [hf, hf]; exact hg.ne h
 
 @[rocq_alias later_chain]
 def laterChain [OFE A] (c : Chain (Later A)) : Chain A where
-  chain n := (c (Nat.succ n)).car
-  cauchy Hle := c.cauchy (Nat.succ_le_succ Hle) _ (Nat.lt_succ_self _)
+  chain n := (c (SIdx.succ n)).car
+  cauchy Hle := c.cauchy (SIdx.succ_le_mono.mp Hle) _ (SIdx.lt_succ_self _)
+
+@[rocq_alias later_limit_bchain]
+def laterLimitBChain [OFE A] {n} (c : BChain (Later A) n) (hn : SIdx.Limit n) :
+    BChain A n where
+  bchain m hm := (c.bchain succᵢ m (hn.succ_lt m hm)).car
+  bcauchy {m} {p} hm hp h :=
+    c.bcauchy (hn.succ_lt m hm) (hn.succ_lt p hp) (SIdx.succ_le_mono.mp h) m (SIdx.lt_succ_self m)
 
 @[rocq_alias later_cofe]
 instance isCOFE_later [OFE A] [IsCOFE A] : IsCOFE (Later A) where
   compl c := Later.next (IsCOFE.compl (laterChain c))
   conv_compl {n} c := by
-    rcases n with _|n' <;> simp [Dist, DistLater]
     intros m Hlt
-    exact (IsCOFE.conv_compl (n := n') (c := laterChain c)).le (Nat.le_of_lt_succ Hlt)
+    refine IsCOFE.conv_compl.trans ?_
+    exact ((c.cauchy <| SIdx.succ_le_of_lt Hlt) m (SIdx.lt_succ_self m)).symm
+  lbcompl {n} hn c := Later.next (IsCOFE.lbcompl hn (laterLimitBChain c hn))
+  conv_lbcompl {n} hn c {m} hm := by
+    intro p hp
+    refine (IsCOFE.conv_lbcompl hn (laterLimitBChain c hn) (SIdx.lt_trans hp hm)).trans ?_
+    exact (c.bcauchy (hn.succ_lt p (SIdx.lt_trans hp hm)) hm
+      (SIdx.le_succ_l.mpr hp) p (SIdx.lt_succ_self p)).symm
+  lbcompl_ne {n} hn c1 c2 {m} hc :=
+    fun p hp => IsCOFE.lbcompl_ne hn _ _ (fun q hq => hc succᵢ q (hn.succ_lt q hq) p hp)
 
 @[rocq_alias laterO_map]
-def laterMap [OFE A] [OFE B] (f : A -n> B)  : Later A -n> Later B := by
+def laterMap [OFE A] [OFE B] (f : A -n> B) : Later A -n> Later B := by
   refine ⟨fun x => Later.next (f x.car), ⟨?_⟩⟩
-  rintro _ ⟨⟩ ⟨⟩ H <;> simp_all only [Dist, DistLater]
+  rintro _ ⟨⟩ ⟨⟩ H; simp_all only [Dist]
   intros m Hlt; exact f.ne.ne (H m Hlt)
 #rocq_ignore later_map "Underlying map of laterMap"
 
@@ -1882,9 +2464,25 @@ def laterMap [OFE A] [OFE B] (f : A -n> B)  : Later A -n> Later B := by
 #rocq_ignore later_map_ne' "Implicit in type of laterMap"
 #rocq_ignore later_map_proper "Derived from nonexpansivity"
 
-instance [OFE α] [Leibniz α] : Leibniz (Later α) where
-  eq_of_eqv {x y} H := match x, y with
-    | ⟨_⟩, ⟨_⟩ => (Later.next.injEq _ _).mpr (eq_of_eqv (α := α) H)
+@[simp, rocq_alias later_map_Next]
+theorem laterMap_next [OFE A] [OFE B] (f : A -n> B) (x : A) :
+    laterMap f (Later.next x) = Later.next (f x) := rfl
+
+@[rocq_alias later_map_id]
+theorem laterMap_id [OFE A] (x : Later A) : laterMap Hom.id x = x := rfl
+
+@[rocq_alias later_map_compose]
+theorem laterMap_compose [OFE A] [OFE B] [OFE C] (f : A -n> B) (g : B -n> C) (x : Later A) :
+    laterMap (g.comp f) x = laterMap g (laterMap f x) := rfl
+
+@[rocq_alias later_map_ext]
+theorem laterMap_ext [OFE A] [OFE B] {f g : A -n> B} (x : Later A) (h : ∀ a, f a = g a) :
+    laterMap f x = laterMap g x := congrArg Later.next (h x.car)
+
+@[rocq_alias laterO_map_contractive]
+instance laterMap_contractive [OFE A] [OFE B] :
+    Contractive (laterMap : (A -n> B) → Later A -n> Later B) where
+  distLater_dist H x m hm := H m hm x.car
 
 end Later
 
@@ -1901,8 +2499,8 @@ instance instOFunctorLater [OFunctor F] : OFunctor (LaterOF F) where
   ofe := _
   map f g := laterMap (OFunctor.map f g)
   map_ne.ne _ _ _ Hx _ _ Hy _ _ := (OFunctor.map_ne.ne Hx Hy _).lt
-  map_id _ := OFunctor.map_id _
-  map_comp _ _ _ _ _ := OFunctor.map_comp ..
+  map_id x := congrArg Later.next (OFunctor.map_id x.car)
+  map_comp f g f' g' x := congrArg Later.next (OFunctor.map_comp f g f' g' x.car)
 
 @[rocq_alias laterOF_contractive]
 instance instOFunctorContractiveLater [OFunctor F] : OFunctorContractive (LaterOF F) where
@@ -1911,76 +2509,111 @@ instance instOFunctorContractiveLater [OFunctor F] : OFunctorContractive (LaterO
 
 end LaterOF
 
-namespace Leibniz
-open COFE
+section IsoCofe
+open OFE COFE
 
--- EXPERIMENT: Threading of Leibniz property through the recursive domain equation solver
--- https://leanprover.zulipchat.com/#narrow/channel/490604-iris-lean/topic/Bi-entailment.20and.20generalized.20rewriting/with/565019365
-class LeibnizPreservingOFunctor (F : OFunctorPre) [OFunctor F] where
-  preserves_leibniz [COFE α] [COFE β] [Leibniz α] [Leibniz β] : Leibniz (F α β)
+variable {α β : Type _}
 
-instance LeibnizPreservingOFunctor.out {F : OFunctorPre} [OFunctor F] [LeibnizPreservingOFunctor F]
-    [COFE α] [COFE β] [Leibniz α] [Leibniz β] : Leibniz (F α β) where
-  eq_of_eqv {x y} hequiv := by
-    haveI := LeibnizPreservingOFunctor.preserves_leibniz (F := F) (α := α) (β := β)
-    exact eq_of_eqv hequiv
+@[reducible, rocq_alias iso_cofe_subtype]
+def isoCofeSubtype [COFE α] [OFE β] (P : α → Prop) (f : ∀ x, P x → β) (g : β -n> α)
+    (g_dist : ∀ (n) (y1 y2 : β), y1 ≡{n}≡ y2 ↔ g y1 ≡{n}≡ g y2)
+    (gf : ∀ x (Hx : P x), g (f x Hx) = x)
+    (Hlimit : ∀ c : Chain β, P (COFE.compl (c.map g)))
+    (Hblimit : ∀ {n} (hn : SIdx.Limit n) (c : BChain β n),
+      P (IsCOFE.lbcompl hn (c.map g))) : IsCOFE β where
+  compl c := f (COFE.compl (c.map g)) (Hlimit c)
+  conv_compl {n} {c} := by
+    refine (g_dist n _ _).mpr ?_
+    rw [gf]; exact COFE.conv_compl
+  lbcompl hn c := f (IsCOFE.lbcompl hn (c.map g)) (Hblimit hn c)
+  conv_lbcompl hn c m hm := by
+    refine (g_dist m _ _).mpr ?_
+    rw [gf]; exact IsCOFE.conv_lbcompl hn (c.map g) hm
+  lbcompl_ne hn c1 c2 m hc := by
+    refine (g_dist m _ _).mpr ?_
+    rw [gf, gf]
+    exact IsCOFE.lbcompl_ne hn _ _ fun p hp => g.ne.ne (hc p hp)
 
-instance instLeibnizPreservingOFunctorLaterOF [OFunctor F] [LeibnizPreservingOFunctor F] :
-    LeibnizPreservingOFunctor (LaterOF F) where
-  preserves_leibniz :=
-    ⟨fun {x y} hequiv => match x, y with | ⟨_⟩, ⟨_⟩ => Later.next.inj (eq_of_eqv hequiv)⟩
+@[reducible, rocq_alias iso_cofe_subtype']
+def isoCofeSubtype' [COFE α] [OFE β] (P : α → Prop) (f : ∀ x, P x → β) (g : β -n> α)
+    (Pg : ∀ y, P (g y))
+    (g_dist : ∀ (n) (y1 y2 : β), y1 ≡{n}≡ y2 ↔ g y1 ≡{n}≡ g y2)
+    (gf : ∀ x (Hx : P x), g (f x Hx) = x) (Hlimit : LimitPreserving P) : IsCOFE β :=
+  isoCofeSubtype P f g g_dist gf (fun c => Hlimit.compl (c.map g) fun n => Pg (c n))
+    (fun hn c => Hlimit.lbcompl hn (c.map g) fun m hm => Pg (c.bchain m hm))
 
-instance instLeibnizPreservingOFunctorConstOF [COFE T] [Leibniz T] :
-    LeibnizPreservingOFunctor (constOF T) where
-  preserves_leibniz := ⟨fun hequiv => by simp only [leibniz] at hequiv; exact hequiv⟩
+@[reducible, rocq_alias iso_cofe]
+def isoCofe [COFE α] [OFE β] (f : α → β) (g : β -n> α)
+    (g_dist : ∀ (n) (y1 y2 : β), y1 ≡{n}≡ y2 ↔ g y1 ≡{n}≡ g y2)
+    (gf : ∀ x, g (f x) = x) : IsCOFE β :=
+  isoCofeSubtype (fun _ => True) (fun x _ => f x) g g_dist (fun x _ => gf x)
+    (fun _ => trivial) (fun _ _ => trivial)
 
-instance instLeibnizPreservingOFunctorIdOF :
-    LeibnizPreservingOFunctor IdOF where
-  preserves_leibniz := ⟨fun hequiv => by simp only [leibniz] at hequiv; exact hequiv⟩
+#rocq_ignore iso_ofe_mixin "OFE from an injection; Lean builds OFE instances directly (cf. `OfeMixin`)."
 
-instance [OFunctor F] [LeibnizPreservingOFunctor F] : LeibnizPreservingOFunctor (OptionOF F) where
-  preserves_leibniz :=
-    ⟨fun {x y} hequiv =>
-        match x, y with
-        | some _, some _ => Option.some_inj.mp (eq_of_eqv hequiv)
-        | none, none => rfl
-        | some _, none => hequiv.elim
-        | none, some _ => hequiv.elim⟩
+@[reducible, rocq_alias sig_cofe]
+def sigCofe [COFE α] {P : α → Prop} (H : LimitPreserving P) : IsCOFE (Subtype P) :=
+  isoCofeSubtype' P (fun x h => ⟨x, h⟩) ⟨Subtype.val, inferInstance⟩ (fun y => y.property)
+    (fun _ _ _ => Iff.rfl) (fun _ _ => rfl) H
 
-instance instLeibnizPreservingOFunctorDiscreteFunOF {C} (F : C → OFunctorPre) [∀ c, OFunctor (F c)]
-    [∀ c, LeibnizPreservingOFunctor (F c)] : LeibnizPreservingOFunctor (DiscreteFunOF F) where
-  preserves_leibniz := ⟨fun hequiv => funext (fun c => eq_of_eqv (hequiv c))⟩
+@[rocq_alias ofe_iso_ofe_mixin]
+instance [OFE α] [OFE β] : OFE (Iso α β) where
+  dist n I1 I2 := I1.hom ≡{n}≡ I2.hom ∧ I1.inv ≡{n}≡ I2.inv
+  dist_eqv := ⟨fun _ => ⟨.rfl, .rfl⟩, fun ⟨h1, h2⟩ => ⟨h1.symm, h2.symm⟩,
+    fun ⟨a1, a2⟩ ⟨b1, b2⟩ => ⟨a1.trans b1, a2.trans b2⟩⟩
+  eq_dist' {_ _} := ⟨fun h _ => h ▸ ⟨.rfl, .rfl⟩,
+    fun H => Iso.ext (eq_dist.mpr fun n => (H n).1) (eq_dist.mpr fun n => (H n).2)⟩
+  dist_lt h hlt := ⟨h.1.lt hlt, h.2.lt hlt⟩
+#rocq_ignore ofe_iso_dist "Local Dist instance; folded into Lean's OFE (Iso α β) instance."
+#rocq_ignore ofe_iso_equiv "Local Equiv instance; folded into Lean's OFE (Iso α β) instance."
 
-instance instLeibnizPreservingOFunctorProdOF [OFunctor F1] [OFunctor F2]
-   [LeibnizPreservingOFunctor F1] [LeibnizPreservingOFunctor F2] :
-   LeibnizPreservingOFunctor (ProdOF F1 F2) where
-  preserves_leibniz := ⟨fun hequiv => Prod.ext (eq_of_eqv hequiv.1) (eq_of_eqv hequiv.2)⟩
+@[rocq_alias ofe_iso_cofe]
+instance ofeIsoCofe [SIdxFinite SI] [COFE α] [COFE β] : IsCOFE (Iso α β) := by
+  refine isoCofeSubtype'
+    (P := fun I : (α -n> β) × (β -n> α) => (∀ y, I.1 (I.2 y) = y) ∧ (∀ x, I.2 (I.1 x) = x))
+    (fun I HI => ⟨I.1, I.2, fun {x} => HI.1 x, fun {x} => HI.2 x⟩)
+    ⟨fun I => (I.hom, I.inv), ⟨fun _ _ _ h => h⟩⟩
+    (fun I => ⟨fun _ => I.hom_inv, fun _ => I.inv_hom⟩)
+    (fun _ _ _ => Iff.rfl) (fun _ _ => rfl) ?_
+  refine LimitPreserving.and ?_ ?_
+  · refine LimitPreserving.forall _ fun y => ?_
+    refine LimitPreserving.equiv
+      ⟨fun I : (α -n> β) × (β -n> α) => I.1 (I.2 y), ⟨fun _ I I' h => ?_⟩⟩ (Hom.const y)
+    exact (h.1 _).trans (I'.1.ne.ne (h.2 y))
+  · refine LimitPreserving.forall _ fun x => ?_
+    refine LimitPreserving.equiv
+      ⟨fun I : (α -n> β) × (β -n> α) => I.2 (I.1 x), ⟨fun _ I I' h => ?_⟩⟩ (Hom.const x)
+    exact (h.2 _).trans (I'.2.ne.ne (h.1 x))
 
-instance instLeibnizPreservingOFunctorSumOF [OFunctor F1] [OFunctor F2]
-    [LeibnizPreservingOFunctor F1] [LeibnizPreservingOFunctor F2] :
-    LeibnizPreservingOFunctor (SumOF F1 F2) where
-  preserves_leibniz :=
-    ⟨ fun {x y} hequiv => match x, y with
-      | .inl _, .inl _ => Sum.inl.inj_iff.mpr (eq_of_eqv (equiv_ext_left hequiv))
-      | .inr _, .inr _ => Sum.inr.inj_iff.mpr (eq_of_eqv (equiv_ext_right hequiv))⟩
+@[rocq_alias iso_ofe_cong]
+def isoOfeCong (F : OFunctorPre) [OFunctor F] {A B : Type _} [COFE A] [COFE B] (I : Iso A B) :
+    Iso (F A A) (F B B) where
+  hom := OFunctor.map I.inv I.hom
+  inv := OFunctor.map I.hom I.inv
+  hom_inv {x} := by
+    rw [← OFunctor.map_comp I.hom I.inv I.inv I.hom x,
+      show I.hom.comp I.inv = Hom.id from Hom.ext (funext fun _ => I.hom_inv), OFunctor.map_id]
+  inv_hom {x} := by
+    rw [← OFunctor.map_comp I.inv I.hom I.hom I.inv x,
+      show I.inv.comp I.hom = Hom.id from Hom.ext (funext fun _ => I.inv_hom), OFunctor.map_id]
 
-instance instanceLeibnizPreservingOFunctorHomOF [OFunctor F1] [OFunctor F2]
-    [LeibnizPreservingOFunctor F1] [LeibnizPreservingOFunctor F2] :
-    LeibnizPreservingOFunctor (HomOF F1 F2) where
-  preserves_leibniz := ⟨fun hequiv => by ext i; exact eq_of_eqv (hequiv i)⟩
+@[rocq_alias iso_ofe_cong_ne]
+instance isoOfeCong_ne (F : OFunctorPre) [OFunctor F] {A B : Type _} [COFE A] [COFE B] :
+    NonExpansive (isoOfeCong F (A := A) (B := B)) where
+  ne _ _ _ h := ⟨OFunctor.map_ne.ne h.2 h.1, OFunctor.map_ne.ne h.1 h.2⟩
 
-instance instanceLeibnizPreservingOFunctorSigmaOF {C} (F : C → OFunctorPre) [∀ c, OFunctor (F c)]
-    [∀ c, LeibnizPreservingOFunctor (F c)] : LeibnizPreservingOFunctor (SigmaOF F) where
-  preserves_leibniz := ⟨fun {x y} hequiv => match x, y with
-    | ⟨x, xH⟩, ⟨y, yH⟩ => by
-      refine Sigma.ext (Sigma.equiv_eq_alt.mp hequiv).choose ?_
-      cases (Sigma.equiv_eq_alt.mp hequiv).choose
-      simp only [heq_eq_eq]
-      exact (eq_of_eqv (Sigma.equiv_eq_alt.mp hequiv).choose_spec)⟩
+@[rocq_alias iso_ofe_cong_contractive]
+instance isoOfeCong_contractive (F : OFunctorPre) [OFunctorContractive F] {A B : Type _}
+    [COFE A] [COFE B] : Contractive (isoOfeCong F (A := A) (B := B)) where
+  distLater_dist H :=
+    ⟨fun x => OFunctorContractive.map_distLater (fun m hm => (H m hm).2) (fun m hm => (H m hm).1) x,
+     fun x => OFunctorContractive.map_distLater (fun m hm => (H m hm).1) (fun m hm => (H m hm).2) x⟩
 
-end Leibniz
+end IsoCofe
 
-theorem OFE.cast_dist [Iα : OFE α] [Iβ : OFE β] {x y : α}
-    (Ht : α = β) (HIt : Iα = Ht ▸ Iβ)  (H : x ≡{n}≡ y) :
+theorem OFE.cast_dist {n} [Iα : OFE α] [Iβ : OFE β] {x y : α}
+    (Ht : α = β) (HIt : Iα = Ht ▸ Iβ) (H : x ≡{n}≡ y) :
     (Ht ▸ x) ≡{n}≡ (Ht ▸ y) := by
   subst Ht; subst HIt; exact H
+
+end Iris

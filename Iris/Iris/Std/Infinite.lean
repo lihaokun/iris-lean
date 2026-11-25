@@ -1,12 +1,11 @@
 /-
-Copyright (c) 2023 Mario Carneiro. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
-Authors: Markus de Medeiros
+Authors: Mario Carneiro, Markus de Medeiros
 -/
 module
 
 public import Iris.Std.List
-import Batteries.Data.List.Perm
 
 @[expose] public section
 
@@ -62,12 +61,12 @@ theorem fresh [InfiniteType A] (X : _root_.List A) : ∃ a : A, a ∉ X := by
   let Nalloc := X.length
   let L := _root_.List.range (Nalloc + 1)
   have hnodup : L.map (InfiniteType.enum (T := A)) |>.Nodup :=
-    nodup_map_of_injective (fun _ _ => InfiniteType.enum_inj _ _) _root_.List.nodup_range
+    List.nodup_map_of_injective (fun _ _ => InfiniteType.enum_inj _ _) List.nodup_range
   have hsub : L.map InfiniteType.enum ⊆ X := by
     intro _ ha
     obtain ⟨_, _, rfl⟩ := _root_.List.mem_map.mp ha
     exact Hcontra _
-  have H := _root_.List.subperm_of_subset hnodup hsub |>.length_le
+  have H := hnodup.length_le_of_subset hsub
   simp only [_root_.List.length_map, Nalloc, L, _root_.List.length_range] at H
   omega
 
@@ -75,6 +74,11 @@ end Iris.Std.List
 
 /-- A predicate is *infinite* if it has a witness outside every finite list. -/
 def PredInfinite (P : α → Prop) : Prop := ∀ xs : List α, ∃ x, P x ∧ x ∉ xs
+
+theorem PredInfinite.exists_ge {P : Nat → Prop} (HP : PredInfinite P) (N : Nat) :
+    ∃ k, N ≤ k ∧ P k :=
+  (HP (List.range N)).elim fun k ⟨hk, hmem⟩ =>
+    ⟨k, Nat.not_lt.mp fun h => hmem (List.mem_range.mpr h), hk⟩
 
 theorem PredInfinite.true [InfiniteType α] : PredInfinite (fun _ : α => True) :=
   fun xs => (Iris.Std.List.fresh xs).elim fun a ha => ⟨a, trivial, ha⟩

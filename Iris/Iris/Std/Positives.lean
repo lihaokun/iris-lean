@@ -1,11 +1,10 @@
 /-
-Copyright (c) 2026 Remy Seassau. All rights reserved.
+Copyright (c) The Iris-Lean Contributors
 Released under Apache 2.0 license as described in the file LICENSE.
 Authors: Remy Seassau, Markus de Medeiros, Sergei Stepanenko
 -/
 module
 
-public import Iris.Std.Classes
 public import Iris.Std.Infinite
 
 @[expose] public section
@@ -197,7 +196,7 @@ def app (p1 p2 : Pos) : Pos :=
 @[reducible]
 instance : HAppend Pos Pos Pos where hAppend := Pos.app
 
-instance app_assoc : @Std.Associative Pos (.++.) where
+instance app_assoc : @Std.Associative Pos (· ++ ·) where
   assoc _ _ p := by induction p <;> simp_all [HAppend.hAppend, app]
 
 @[simp]
@@ -206,9 +205,9 @@ theorem app_1_left_id (p : Pos) : app P1 p = p := by
 
 @[simp]
 theorem app_1_right_id (p : Pos) : app p P1 = p := by
-  induction p <;> simp [app] <;> assumption
+  induction p <;> simp [app]
 
-instance app_1_l : @Std.LawfulLeftIdentity Pos Pos (.++.) P1 where
+instance app_1_l : @Std.LawfulLeftIdentity Pos Pos (· ++ ·) P1 where
   left_id p := app_1_left_id p
 
 def reverseGo (p1 p2 : Pos) : Pos :=
@@ -241,7 +240,7 @@ theorem reverse_xI p : reverse (p~1) = (P1~1) ++ reverse p :=
 
 /-- Duplicate the bits of a positive, i.e. 1~0~1 -> 1~0~0~1~1 and
       1~1~0~0 -> 1~1~1~0~0~0~0 -/
-def dup  : Pos -> Pos
+def dup : Pos -> Pos
 | xH => P1
 | p~0 => (dup p)~0~0
 | p~1 => (dup p)~1~1
@@ -349,7 +348,7 @@ theorem flatten_suffix (l k : List Pos) : l <:+ k -> ∃ q, flatten k = q ++ fla
   rintro ⟨l', rfl⟩
   exact ⟨_, flatten_app⟩
 
-def app_inj (p : Pos) : (· ++ p).Injective :=
+theorem app_inj (p : Pos) : (· ++ p).Injective :=
   fun a a' Heq => by induction p <;> simp_all [HAppend.hAppend, app]
 
 theorem reverse_involutive p : reverse (reverse p) = p := by
@@ -358,7 +357,7 @@ theorem reverse_involutive p : reverse (reverse p) = p := by
   | xO p IH => rewrite [reverse_x0, reverse_app, IH]; rfl
   | xH => rfl
 
-def rev_inj : reverse.Injective :=
+theorem rev_inj : reverse.Injective :=
   fun p q Heq => by
     rewrite [<- reverse_involutive p, <- reverse_involutive q]
     simp [Heq]
@@ -384,11 +383,11 @@ theorem dup_suffix_eq {p q s1 s2} :
   induction p generalizing q with
   | xI p IH =>
     intros Heq
-    cases q <;> simp_all [HAppend.hAppend, app, dup] <;> rename Pos => q
+    cases q <;> simp_all [HAppend.hAppend, app, dup]; rename Pos => q
     rewrite [IH] <;> rfl
   | xO p IH =>
     intros Heq
-    cases q <;> simp_all [HAppend.hAppend, app, dup] <;> rename Pos => q
+    cases q <;> simp_all [HAppend.hAppend, app, dup]; rename Pos => q
     rewrite [IH] <;> rfl
   | xH => cases q <;> simp [HAppend.hAppend, app, dup]
 
@@ -410,14 +409,30 @@ class Countable (A : Type) where
   decode : Pos -> Option A
   decode_encode x : decode (encode x) = some x
 
-def some_inj {A} : (@some A).Injective :=
+theorem some_inj {A} : (@some A).Injective :=
   fun _ _ => by rintro ⟨⟩; rfl
 
-def encode_inj [c : Countable A] : c.encode.Injective :=
+theorem encode_inj [c : Countable A] : c.encode.Injective :=
   fun x _ Hxy => by
     apply some_inj
     rewrite [<- c.decode_encode x, Hxy, c.decode_encode]
     rfl
+
+@[simp]
+theorem encode_eq_iff [Countable A] {x y : A} : Countable.encode x = Countable.encode y ↔ x = y :=
+  ⟨fun H => encode_inj H, fun H => H ▸ rfl⟩
+
+open Classical in
+/-- Countability from an injection into `Pos`. Rocq's `inj_countable` asks for a computable
+partial inverse of the injection; the inverse here is obtained classically, so the `decode` of
+the resulting instance is noncomputable. -/
+@[reducible]
+noncomputable def Countable.ofInjective {A} (f : A → Pos) (Hf : f.Injective) : Countable A where
+  encode := f
+  decode p := if H : ∃ a, f a = p then some H.choose else none
+  decode_encode a := by
+    have H : ∃ b, f b = f a := ⟨a, rfl⟩
+    rw [dite_eq_left H]; exact congrArg some (Hf H.choose_spec)
 
 instance [Countable A] : Countable (List A) where
   encode xs := Pos.flatten (List.map Countable.encode xs)
@@ -430,6 +445,11 @@ instance : Countable Pos where
   encode := id
   decode := some
   decode_encode _ := rfl
+
+instance : Countable Nat where
+  encode := ofNat
+  decode := some ∘ (toNat · - 1)
+  decode_encode _ := by simp [toNat_ofNat]
 
 instance : Pos.Countable Char where
   encode c := Pos.ofNat c.val.toNat
@@ -445,6 +465,19 @@ instance : Pos.Countable String where
   encode s := (Pos.Countable.encode : List Char → Pos) s.toList
   decode p := ((Pos.Countable.decode p : Option (List Char))).map String.ofList
   decode_encode s := by simp [Pos.Countable.decode_encode, String.ofList_toList]
+
+instance : Pos.Countable Bool where
+  encode b := Pos.Countable.encode (if b then 1 else 0 : Nat)
+  decode p := ((Pos.Countable.decode p : Option Nat)).map (· != 0)
+  decode_encode b := by cases b <;> simp [Pos.Countable.decode_encode]
+
+/-- `Int` is countable by interleaving the non-negative and the negative integers. -/
+instance : Pos.Countable Int where
+  encode i := Pos.Countable.encode (if 0 ≤ i then 2 * i.toNat else 2 * (-i).toNat - 1)
+  decode p := ((Pos.Countable.decode p : Option Nat)).map
+    fun n => if n % 2 = 0 then (n / 2 : Int) else -((n + 1) / 2 : Int)
+  decode_encode i := by
+    by_cases h : 0 ≤ i <;> simp [Pos.Countable.decode_encode, h] <;> omega
 
 instance : Ord Pos where
   compare x y := Pos.compare x y
